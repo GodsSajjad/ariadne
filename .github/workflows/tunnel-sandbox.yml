@@ -578,14 +578,6 @@ jobs:
           echo "Time up. Shutting down."
 
       # ------------------ Failure handling / tmate rescue ------------------
-      - name: 🔧 tmate rescue (detached, on failure)
-        id: tmate
-        if: failure()
-        uses: mxschmitt/action-tmate@v3
-        with:
-          detached: true
-          limit-access-to-actor: true
-
       - name: Collect quick logs (on failure)
         if: failure()
         run: |
@@ -597,6 +589,15 @@ jobs:
           tail -n 120 ~/localhostrun.jsonl || true
           echo '--- tor/tor.log (last 120) ---'
           tail -n 120 tor/tor.log || true
+
+      - name: 🔧 tmate rescue (detached, on failure)
+        id: tmate
+        if: failure()
+        timeout-minutes: ${{ env.DEBUG_WINDOW_MINUTES }}
+        uses: mxschmitt/action-tmate@v3
+        with:
+          detached: true
+          limit-access-to-actor: true
 
       - name: Upsert status comment (tmate links)
         if: failure()
@@ -634,7 +635,7 @@ jobs:
       - name: Wait for debugging window
         if: failure()
         run: |
-          mins=${DEBUG_WINDOW_MINUTES:-10}
+          mins="${DEBUG_WINDOW_MINUTES:-10}"
           echo "Debug window: $mins minute(s)."
-          for _ in $(seq 1 $((mins*60))); do sleep 1; done
+          sleep "$((mins*60))"
 
