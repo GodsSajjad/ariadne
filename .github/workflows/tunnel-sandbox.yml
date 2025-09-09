@@ -380,6 +380,12 @@ jobs:
           Write-Host "Downloading Tor Expert Bundle from official archive..."
           Invoke-WebRequest -Uri $url -OutFile $tarFile
 
+          # --- THIS IS THE FIX ---
+          # We must create the destination directory before telling tar to use it.
+          Write-Host "Creating extraction directory: $extractPath"
+          New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
+          # ---------------------
+
           Write-Host "Extracting '$tarFile' to '$extractPath'..."
           # Windows runners have a native tar.exe that can handle .tar.gz
           tar -xzf $tarFile -C $extractPath
