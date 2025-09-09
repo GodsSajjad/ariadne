@@ -355,27 +355,78 @@ jobs:
           echo "ACCESS_VALUE=${TS_IP}" >> $GITHUB_ENV
           echo "ACCESS_NOTE=Paste the SSH command below in your terminal, then open the local URL." >> $GITHUB_ENV
 
-      # ------------------ Tor ------------------
-      - name: Install and start Tor (Linux only)
+      # ------------------ Tor (Linux, macOS, Windows) ------------------
+      - name: Install Tor (Linux)
         if: env.TUNNEL == 'tor' && runner.os == 'Linux'
         run: |
-          sudo apt-get update -y && sudo apt-get install -y tor
-          mkdir -p tor/hidden_service && chmod 700 tor/hidden_service
+          sudo apt-get update -y
+          sudo apt-get install -y tor netcat
+
+      - name: Install Tor (macOS)
+        if: env.TUNNEL == 'tor' && runner.os == 'macOS'
+        run: |
+          brew install tor
+
+      - name: Install Tor (Windows)
+        if: env.TUNNEL == 'tor' && runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install tor-expert-bundle -y
+
+      - name: Configure, Start Tor, and Get Onion URL
+        if: env.TUNNEL == 'tor'
+        # On Windows, we use Git Bash to get access to netcat (nc), grep, etc.
+        shell: ${{ runner.os == 'Windows' && 'bash' || 'default' }}
+        run: |
+          echo "Configuring and starting Tor onion service..."
+          mkdir -p tor
+          # This torrc creates a hidden service and enables the control port
+          # so we can query it directly for the .onion address.
           cat > tor/torrc <<EOF
-          Log notice stdout
           DataDirectory $(pwd)/tor
           HiddenServiceDir $(pwd)/tor/hidden_service
           HiddenServiceVersion 3
-          HiddenServicePort 80 127.0.0.1:${PORT}
+          HiddenServicePort 80 12 AUTH_COOKIE $(pwd)/tor/control_auth_cookie
+          ControlPort 9051
           EOF
-          (tor -f tor/torrc > tor/tor.log 2>&1 &) && sleep 5
-          for i in {1..120}; do [ -s tor/hidden_service/hostname ] && break; sleep 1; done
-          if ! [ -s tor/hidden_service/hostname ]; then echo "Tor URL not found"; cat tor/tor.log; exit 1; fi
-          onion=$(cat tor/hidden_service/hostname)
+
+          # Start tor in the background
+          tor -f tor/torrc > tor/tor.log 2>&1 &
+
+          echo "Waiting for Onion URL from control port..."
+          onion=""
+          for i in {1..90}; do
+            # Check if the control port is open and responsive
+            if nc -z 127.0.0.1 9051; then
+              # Authenticate and request the onion address. The AUTHENTICATE command
+              # with no password works for the default ControlPort setup.
+              response=$( (printf "AUTHENTICATE\r\nGETINFO hs/client/onion-address\r\nQUIT\r\n"; sleep 1) | nc 127.0.0.1 9051 )
+
+              # Check if we got a valid response
+              if [[ "$response" == *"hs/client/onion-address="* ]]; then
+                onion=$(echo "$response" | grep "hs/client/onion-address=" | cut -d'=' -f2)
+                # Sometimes it includes quotes, so we strip them
+                onion="${onion//\"/}"
+                if [[ "$onion" == *".onion"* ]]; then
+                  echo "Successfully retrieved onion URL: $onion"
+                  break
+                fi
+              fi
+            fi
+            sleep 1
+          done
+
+          if [ -z "$onion" ]; then
+            echo "::error::Tor did not generate an onion URL in time."
+            echo "--- tor/tor.log ---"
+            tail -n 120 tor/tor.log || true
+            exit 1
+          fi
+
           echo "PUBLIC_URL=$onion" >> $GITHUB_ENV
           echo "ACCESS_KIND=browser" >> $GITHUB_ENV
           echo "ACCESS_VALUE=$onion" >> $GITHUB_ENV
-          echo "ACCESS_NOTE=Open with Tor Browser." >> $GITHUB_ENV
+          echo "ACCESS_NOTE=Requires Tor Browser." >> $GITHUB_ENV
 
       # ------------------ Final Status & Keep-Alive ------------------
       - name: Upsert status comment (final access)
