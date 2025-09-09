@@ -27,17 +27,22 @@ assignees: ''
 
 ---
 
+# :spanner: Control Panel
+
 ## Runner OS (pick ONE)
-- [ ] Ubuntu (ubuntu-latest)
+- [x] Ubuntu (ubuntu-latest)
 - [ ] macOS (macos-14)
 - [ ] Windows (windows-latest)
 
 ## Tunnel (pick ONE)
-- [ ] Cloudflare Tunnel (ephemeral trycloudflare.com)
+- [x] Cloudflare Tunnel (ephemeral trycloudflare.com)
 - [ ] localhost.run (free SSH reverse tunnel)
 - [ ] Inlets PRO (requires secrets)
 - [ ] Tailscale (VPN overlay; SSH port-forward from your device)
 - [ ] Tor (hidden service onion URL)
+
+## Power
+- [x] ON (uncheck to turn off)
 
 ## Settings
 **Port:** `8080`  
