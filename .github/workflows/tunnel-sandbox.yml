@@ -13,10 +13,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.issue.number }}
   cancel-in-progress: true
 
+# Safer bash defaults everywhere
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
 env:
   DEFAULT_PORT: "8080"
   DEFAULT_MINUTES: "40"
   STATUS_MARK: "<!-- TUNNEL_SANDBOX_STATUS -->"
+  MAX_CAP_MINUTES: "80" # hard cap for the main job & keepalive logic
 
 jobs:
   # -----------------------------
@@ -89,9 +95,11 @@ jobs:
         uses: actions/github-script@v7
         env:
           STATUS_MARK: ${{ env.STATUS_MARK }}
+          MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
         with:
           script: |
             const mark = process.env.STATUS_MARK;
+            const cap  = process.env.MAX_CAP_MINUTES || "80";
             const body = [
               mark,
               "### Tunnel Sandbox · Status",
@@ -101,12 +109,11 @@ jobs:
               `- OS: \`${{ steps.pick.outputs.os }}\``,
               `- Tunnel: \`${{ steps.pick.outputs.tunnel }}\``,
               `- Port: \`${{ steps.pick.outputs.port }}\``,
-              `- Minutes: \`${{ steps.pick.outputs.minutes }}\``,
+              `- Minutes: \`${{ steps.pick.outputs.minutes }}\` (hard cap: ${cap})`,
               "",
               "_Spinning up… this comment will update with the access method._",
               ""
             ].join("\n");
-            // find existing status comment
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100
             });
@@ -172,18 +179,19 @@ jobs:
           || contains(github.event.issue.body, '## Runner OS (pick ONE)')
         )
     runs-on: ${{ needs.parse.outputs.os }}
-    timeout-minutes: 120
+    timeout-minutes: 80   # workflow-wide hard cap enforced via main job
     env:
       PORT: ${{ needs.parse.outputs.port }}
       KEEP_MINUTES: ${{ needs.parse.outputs.minutes }}
       TUNNEL: ${{ needs.parse.outputs.tunnel }}
       TS_HOSTNAME: "gh-runner-${{ github.run_id }}"
+      MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
     steps:
       - name: Show environment
         run: |
           echo "Runner OS: $RUNNER_OS"
           echo "PORT=$PORT"
-          echo "KEEP_MINUTES=$KEEP_MINUTES"
+          echo "KEEP_MINUTES=$KEEP_MINUTES (hard cap ${MAX_CAP_MINUTES})"
           echo "TUNNEL=$TUNNEL"
 
       # --- Basics per OS
@@ -212,7 +220,6 @@ jobs:
           node-version: '20'
 
       - name: Create Hello World server
-        shell: bash
         run: |
           cat > server.js <<'JS'
           const http = require('http');
@@ -225,7 +232,6 @@ jobs:
           JS
 
       - name: Start server & verify port
-        shell: bash
         run: |
           nohup node server.js > server.log 2>&1 &
           for i in {1..60}; do
@@ -262,9 +268,7 @@ jobs:
 
       - name: Start Cloudflare Tunnel
         if: ${{ env.TUNNEL == 'cloudflare' }}
-        shell: bash
         run: |
-          set -euo pipefail
           : > cloudflared.log
           (cloudflared tunnel --url "http://127.0.0.1:${PORT}" --no-autoupdate >> cloudflared.log 2>&1) &
           URL=""
@@ -273,39 +277,63 @@ jobs:
             [ -n "$URL" ] && break
             sleep 1
           done
+          if [ -z "$URL" ]; then
+            echo "Failed to obtain Cloudflare URL"; tail -n 120 cloudflared.log; exit 1
+          fi
           echo "PUBLIC_URL=${URL}" >> $GITHUB_ENV
           echo "ACCESS_KIND=browser" >> $GITHUB_ENV
           echo "ACCESS_VALUE=${URL}" >> $GITHUB_ENV
           echo "ACCESS_NOTE=Open in a regular browser." >> $GITHUB_ENV
 
-      # ------------------ localhost.run ------------------
-      - name: Start localhost.run (SSH reverse)
+      # ------------------ localhost.run (lhr) ------------------
+      - name: Start localhost.run (SSH reverse, JSON tail, battle-tested)
         if: ${{ env.TUNNEL == 'localhostrun' }}
-        shell: bash
+        id: lhr
+        env:
+          PORT: ${{ env.PORT }}
         run: |
-          set -euo pipefail
-          : > lhr.json
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-              -R 80:127.0.0.1:${PORT} nokey@localhost.run -- --output json > lhr.json 2>&1 &
-          URL=""
-          for i in {1..120}; do
-            URL="$(jq -r '
-              select(.event=="tcpip-forward" and .status=="success")
-              | ((.tls_termination // false) as $tls |
-                 ($tls | if . then "https://" else "http://" end) + (.address // .listen_host // ""))
-            ' lhr.json 2>/dev/null | tail -n1 || true)"
-            [ -n "$URL" ] && break
-            sleep 1
+          LOG_JSON="${HOME}/localhostrun.jsonl"; : > "$LOG_JSON"
+          if command -v stdbuf >/dev/null 2>&1; then STD="stdbuf -o0 -e0"; else STD=""; fi
+          SSH_OPTS=(-o StrictHostKeyChecking=no -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes)
+          $STD ssh "${SSH_OPTS[@]}" -v -f -R 80:127.0.0.1:${PORT} nokey@localhost.run -- --output json &> "$LOG_JSON" || true
+
+          exec 3< <(tail -n +1 -F "$LOG_JSON")
+          start_epoch=$(date +%s)
+          found_url=""
+
+          while true; do
+            if ! IFS= read -r -t 1 line <&3; then
+              now=$(date +%s)
+              (( now - start_epoch >= 90 )) && break
+              continue
+            fi
+            tsv=$(printf '%s\n' "$line" | jq -Rr 'fromjson?|select(.event=="tcpip-forward" and .status=="success")|[(.address // .listen_host // ""), (if .tls_termination then "true" else "false" end), (.message // "")]|@tsv' || true)
+            [[ -z "$tsv" ]] && continue
+            host=$(printf '%s' "$tsv" | cut -f1)
+            tls=$(printf '%s' "$tsv" | cut -f2)
+            if [[ -n "$host" ]]; then
+              scheme="http"; [[ "$tls" == "true" ]] && scheme="https"
+              found_url="${scheme}://${host}"
+              break
+            fi
           done
-          echo "PUBLIC_URL=${URL}" >> $GITHUB_ENV
-          echo "ACCESS_KIND=browser" >> $GITHUB_ENV
-          echo "ACCESS_VALUE=${URL}" >> $GITHUB_ENV
-          echo "ACCESS_NOTE=Open in a regular browser." >> $GITHUB_ENV
+          exec 3<&-
+
+          if [[ -z "$found_url" ]]; then
+            echo "FAILED to discover SSH public URL"
+            tail -n 200 "$LOG_JSON" || true
+            exit 1
+          fi
+
+          echo "::add-mask::$found_url"
+          echo "PUBLIC_URL=${found_url}"       >> "$GITHUB_ENV"
+          echo "ACCESS_KIND=browser"          >> "$GITHUB_ENV"
+          echo "ACCESS_VALUE=${found_url}"    >> "$GITHUB_ENV"
+          echo "ACCESS_NOTE=Open in a regular browser." >> "$GITHUB_ENV"
 
       # ------------------ Inlets PRO ------------------
       - name: Check Inlets secrets
         if: ${{ env.TUNNEL == 'inlets' }}
-        shell: bash
         env:
           INLETS_REMOTE: ${{ secrets.INLETS_REMOTE }}
           INLETS_TOKEN: ${{ secrets.INLETS_TOKEN }}
@@ -341,14 +369,12 @@ jobs:
 
       - name: Start Inlets PRO client
         if: ${{ env.TUNNEL == 'inlets' }}
-        shell: bash
         env:
           INLETS_REMOTE: ${{ secrets.INLETS_REMOTE }}
           INLETS_TOKEN: ${{ secrets.INLETS_TOKEN }}
           INLETS_LICENSE: ${{ secrets.INLETS_LICENSE }}
           INLETS_PUBLIC_URL: ${{ secrets.INLETS_PUBLIC_URL }}
         run: |
-          set -euo pipefail
           : > inlets.log
           ( inlets-pro http client \
               --url "${INLETS_REMOTE}" \
@@ -356,9 +382,12 @@ jobs:
               --upstream "http://127.0.0.1:${PORT}" \
               --license "${INLETS_LICENSE}" \
               --auto-tls ) >> inlets.log 2>&1 &
-          echo "PUBLIC_URL=${INLETS_PUBLIC_URL:-}" >> $GITHUB_ENV
+          if [ -z "${INLETS_PUBLIC_URL:-}" ]; then
+            echo "Missing INLETS_PUBLIC_URL (set a secret for a clickable link)"; exit 1
+          fi
+          echo "PUBLIC_URL=${INLETS_PUBLIC_URL}" >> $GITHUB_ENV
           echo "ACCESS_KIND=browser" >> $GITHUB_ENV
-          echo "ACCESS_VALUE=${INLETS_PUBLIC_URL:-}" >> $GITHUB_ENV
+          echo "ACCESS_VALUE=${INLETS_PUBLIC_URL}" >> $GITHUB_ENV
           echo "ACCESS_NOTE=Open in a regular browser." >> $GITHUB_ENV
 
       # ------------------ Tailscale ------------------
@@ -385,8 +414,10 @@ jobs:
             --authkey="${{ secrets.TAILSCALE_AUTHKEY }}" \
             --hostname="${TS_HOSTNAME}" \
             --ssh \
-            --accept-dns=false
+            --accept-dns=false \
+            --advertise-exit-node=false
           tailscale ip -4 | head -n1 > ts.ipv4
+          if ! [ -s ts.ipv4 ]; then echo "No Tailscale IPv4"; exit 1; fi
           echo "TS_IP=$(cat ts.ipv4)" >> $GITHUB_ENV
           echo "ACCESS_KIND=ssh" >> $GITHUB_ENV
           echo "ACCESS_VALUE=$(cat ts.ipv4)" >> $GITHUB_ENV
@@ -413,9 +444,13 @@ jobs:
           EOF
           (tor -f tor/torrc > tor/tor.log 2>&1 &) && sleep 5
           for i in {1..120}; do [ -f tor/hidden_service/hostname ] && break; sleep 1; done
-          echo "PUBLIC_URL=$(cat tor/hidden_service/hostname || true)" >> $GITHUB_ENV
+          if ! [ -s tor/hidden_service/hostname ]; then
+            echo "Tor did not generate an onion URL"; tail -n 120 tor/tor.log || true; exit 1
+          fi
+          onion=$(cat tor/hidden_service/hostname)
+          echo "PUBLIC_URL=$onion" >> $GITHUB_ENV
           echo "ACCESS_KIND=browser" >> $GITHUB_ENV
-          echo "ACCESS_VALUE=$(cat tor/hidden_service/hostname || true)" >> $GITHUB_ENV
+          echo "ACCESS_VALUE=$onion" >> $GITHUB_ENV
           echo "ACCESS_NOTE=Open with Tor Browser." >> $GITHUB_ENV
 
       # ------------------ Upsert status with final access method ------------------
@@ -432,6 +467,7 @@ jobs:
           ACCESS_KIND: ${{ env.ACCESS_KIND }}
           ACCESS_VALUE: ${{ env.ACCESS_VALUE }}
           ACCESS_NOTE: ${{ env.ACCESS_NOTE }}
+          MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
         with:
           script: |
             const mark = process.env.STATUS_MARK;
@@ -443,6 +479,7 @@ jobs:
             const kind = process.env.ACCESS_KIND || "";
             const val  = process.env.ACCESS_VALUE || "";
             const note = process.env.ACCESS_NOTE || "";
+            const cap  = process.env.MAX_CAP_MINUTES || "80";
 
             const userLinux = "runner";
             const userMac   = "runner";
@@ -494,6 +531,7 @@ jobs:
               "",
               accessBlock,
               "",
+              `_Max runtime capped at ${cap} minutes even if you request longer._`,
               "_Edit this issue to change options. Concurrency cancels the previous run._",
               ""
             ].join("\n");
@@ -508,16 +546,19 @@ jobs:
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
             }
 
-      # ------------------ Keep session alive ------------------
+      # ------------------ Keep session alive (honors cap) ------------------
       - name: Keep session alive
-        shell: bash
         run: |
-          secs=$(( KEEP_MINUTES * 60 ))
-          echo "Keeping the session alive for $KEEP_MINUTES minute(s)..."
+          # Respect user minutes, but never exceed MAX_CAP_MINUTES
+          want_secs=$(( KEEP_MINUTES * 60 ))
+          cap_secs=$(( MAX_CAP_MINUTES * 60 ))
+          secs=$want_secs
+          if (( secs > cap_secs )); then secs=$cap_secs; fi
+          echo "Keeping the session alive for $(( secs / 60 )) minute(s) (capped)."
           for _ in $(seq 1 $secs); do sleep 1; done
           echo "Time up. Shutting down."
 
-      # 1) Start tmate but don't block this step
+      # ------------------ Failure handling / tmate rescue ------------------
       - name: 🔧 tmate rescue (detached, on failure)
         id: tmate
         if: failure()
@@ -526,10 +567,23 @@ jobs:
           detached: true
           limit-access-to-actor: true
 
-      # 2) Update your living status comment with the links
+      - name: Collect quick logs (on failure)
+        if: failure()
+        run: |
+          echo '--- server.log (last 80) ---'
+          tail -n 80 server.log || true
+          echo '--- cloudflared.log (last 120) ---'
+          tail -n 120 cloudflared.log || true
+          echo '--- localhostrun.jsonl (last 120) ---'
+          tail -n 120 ~/localhostrun.jsonl || true
+          echo '--- tor/tor.log (last 120) ---'
+          tail -n 120 tor/tor.log || true
+
       - name: Upsert status comment (tmate links)
         if: failure()
         uses: actions/github-script@v7
+        env:
+          STATUS_MARK: ${{ env.STATUS_MARK }}
         with:
           script: |
             const mark = process.env.STATUS_MARK;
@@ -558,12 +612,10 @@ jobs:
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
             }
 
-      # 3) Keep the runner alive so you have time to connect (adjust minutes)
       - name: Wait for debugging window
         if: failure()
         run: |
-          mins=5 
+          mins=${DEBUG_WINDOW_MINUTES:-10}
           echo "Debug window: $mins minute(s)."
           for _ in $(seq 1 $((mins*60))); do sleep 1; done
-
 

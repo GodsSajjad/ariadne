@@ -4,11 +4,13 @@ about: Spin up a Hello World server and expose it via a chosen tunnel
 title: Tunnel Sandbox
 labels: tunnel-sandbox
 assignees: ''
-
 ---
 
 > **What is this?**  
 > Open this issue, tick your options, and the workflow will spin up a short-lived test server on a GitHub Actions runner and expose it via the tunnel you choose. Edit the issue to re-run with new options.
+
+> **What happens next?**  
+> After you submit, the bot comments a status block that includes your access link or SSH command. If something fails, it automatically opens a private tmate shell for you.
 
 ## Tunneling Access Overview
 
@@ -21,9 +23,10 @@ assignees: ''
 | **Tor** | Yes (`.onion`) | Local hidden service → onion URL | Variable (high latency) | High | Pseudonymous; Tor-only | Privacy-focused access |
 
 > Notes:  
-> • **Tailscale** requires you (and testers) to be on the same tailnet; we’ll comment a ready `ssh -L ...` command.  
+> • **Tailscale** requires you (and testers) to be on the same tailnet; we comment a ready `ssh -L ...` command.  
 > • **Inlets PRO** needs secrets for your controller (see below).  
-> • **Tor** requires Tor Browser to visit `.onion` URLs.
+> • **Tor** requires Tor Browser to visit `.onion` URLs.  
+> • **Max runtime is capped at 80 minutes**, even if you request longer.
 
 ---
 
@@ -63,3 +66,4 @@ assignees: ''
 - Your device must be logged into the same tailnet. The workflow will comment a copy-paste SSH port-forward command.
 
 > Click options to change them — the action will re-run with the options you select. You can also edit the issue manually.
+
