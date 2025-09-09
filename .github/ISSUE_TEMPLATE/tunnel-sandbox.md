@@ -32,20 +32,22 @@ assignees: ''
 
 # 🔧 Control Panel
 
-## Runner OS (pick ONE)
+Select a runner, a tunnel then power on to start!
+
+## 1. Runner OS (pick ONE)
 - [x] Ubuntu (ubuntu-latest)
 - [ ] macOS (macos-14)
 - [ ] Windows (windows-latest)
 
-## Tunnel (pick ONE)
+## 2. Tunnel (pick ONE)
 - [x] Cloudflare Tunnel (ephemeral trycloudflare.com)
 - [ ] localhost.run (free SSH reverse tunnel)
 - [ ] Inlets PRO (requires secrets)
 - [ ] Tailscale (VPN overlay; SSH port-forward from your device)
 - [ ] Tor (hidden service onion URL)
 
-## Power
-- [x] ON (uncheck to turn off)
+## 3. Power
+- [ ] ON (toggle on/off)
 
 ## Settings
 **Port:** `8080`  
