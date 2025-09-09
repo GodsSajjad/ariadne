@@ -35,11 +35,13 @@ assignees: ''
 Select a runner, a tunnel, then check "ON" to start!
 
 ## 1. Runner OS (pick ONE)
+
 - [x] Ubuntu (ubuntu-latest)
 - [ ] macOS (macos-14)
 - [ ] Windows (windows-latest)
 
 ## 2. Tunnel (pick ONE)
+
 - [x] Cloudflare Tunnel (ephemeral trycloudflare.com)
 - [ ] localhost.run (free SSH reverse tunnel)
 - [ ] Inlets PRO (requires secrets)
@@ -47,6 +49,7 @@ Select a runner, a tunnel, then check "ON" to start!
 - [ ] Tor (hidden service onion URL)
 
 ## 3. Power
+
 - [ ] ON (check this box to start the sandbox)
 
 ## 4. Config (Optional)
