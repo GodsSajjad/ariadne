@@ -553,7 +553,7 @@ jobs:
                   "**Access Method**", "",
                   "**Paste in terminal for SSH port-forward:**",
                   "```bash",
-                  `ssh -N -L ${fwd}:127.0.0.1:${port} ${user}@${tsip}`,
+                  `ssh -N -L ${fwd}:127.0.0.1:${port} ${tsip}`,
                   "```",
                   `then open: **http://localhost:${fwd}**`, "",
                   "_Your device must be logged into the same tailnet; TS-SSH is enabled._"
