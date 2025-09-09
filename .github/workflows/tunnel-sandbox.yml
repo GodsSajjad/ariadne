@@ -371,7 +371,34 @@ jobs:
         if: env.TUNNEL == 'tor' && runner.os == 'Windows'
         shell: powershell
         run: |
-          choco install tor-expert-bundle -y
+          # The latest Tor Expert Bundle is a .tar.gz file, not a zip.
+          # We will download it from the official archive and extract using the native tar.exe.
+          $url = "https://archive.torproject.org/tor-package-archive/torbrowser/14.5.6/tor-expert-bundle-windows-x86_64-14.5.6.tar.gz"
+          $tarFile = "tor-bundle.tar.gz"
+          $extractPath = "C:\tor-bundle"
+
+          Write-Host "Downloading Tor Expert Bundle from official archive..."
+          Invoke-WebRequest -Uri $url -OutFile $tarFile
+
+          Write-Host "Extracting '$tarFile' to '$extractPath'..."
+          # Windows runners have a native tar.exe that can handle .tar.gz
+          tar -xzf $tarFile -C $extractPath
+
+          # Find the directory containing tor.exe recursively. This is more robust
+          # than assuming a specific folder structure inside the archive.
+          $torExeDir = (Get-ChildItem -Path $extractPath -Recurse -Filter tor.exe).DirectoryName
+          
+          if (-not $torExeDir) {
+            Write-Error "Could not find tor.exe in the extracted archive."
+            exit 1
+          }
+
+          Write-Host "Adding '$torExeDir' to the PATH for this job."
+          Add-Content -Path $env:GITHUB_PATH -Value $torExeDir
+
+          # Verify that the 'tor' command is now available.
+          Write-Host "Verifying installation:"
+          tor --version
 
       - name: Configure and Start Tor (Windows)
         if: env.TUNNEL == 'tor' && runner.os == 'Windows'
