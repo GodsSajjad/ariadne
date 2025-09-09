@@ -275,10 +275,24 @@ jobs:
       # ------------------ Inlets PRO ------------------
       - name: Check Inlets secrets
         if: env.TUNNEL == 'inlets'
+        # Pass the secrets into the step's environment
+        env:
+          INLETS_REMOTE: ${{ secrets.INLETS_REMOTE }}
+          INLETS_TOKEN: ${{ secrets.INLETS_TOKEN }}
+          INLETS_LICENSE: ${{ secrets.INLETS_LICENSE }}
+          # The public URL is technically optional for the client to run,
+          # but required for the workflow to post a useful comment.
+          INLETS_PUBLIC_URL: ${{ secrets.INLETS_PUBLIC_URL }}
         run: |
           missing=0
-          for v in INLETS_REMOTE INLETS_TOKEN INLETS_LICENSE INLETS_PUBLIC_URL; do
-            if [ -z "${{ secrets[v] }}" ]; then echo "Missing secret: $v"; missing=1; fi
+          # Iterate over the NAMES of the variables
+          for v_name in INLETS_REMOTE INLETS_TOKEN INLETS_LICENSE INLETS_PUBLIC_URL; do
+            # Use shell's indirect expansion `${!v_name}` to get the value
+            # of the variable whose name is stored in v_name.
+            if [ -z "${!v_name}" ]; then
+              echo "::error::Missing required secret: $v_name"
+              missing=1
+            fi
           done
           exit $missing
 
