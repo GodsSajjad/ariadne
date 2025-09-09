@@ -346,10 +346,13 @@ jobs:
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo systemctl start tailscaled
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            # Using sudo is critical here
-            sudo /usr/local/bin/tailscaled > /tmp/tailscaled.log 2>&1 &
+            # --- THIS IS THE FIX ---
+            # 'brew services' correctly registers the daemon with the OS so it
+            # persists after this step finishes. This is the idiomatic way.
+            sudo brew services start tailscale
           fi
           # Give the service a moment to initialize before we try to use it.
+          echo "Waiting for tailscaled to be ready..."
           sleep 5
 
       - name: Tailscale up
