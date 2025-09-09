@@ -185,9 +185,10 @@ jobs:
       KEEP_MINUTES: ${{ needs.parse.outputs.minutes }}
       TUNNEL: ${{ needs.parse.outputs.tunnel }}
       TS_HOSTNAME: "gh-runner-${{ github.run_id }}"
-      MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
     steps:
       - name: Show environment
+        env:
+          MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
         run: |
           echo "Runner OS: $RUNNER_OS"
           echo "PORT=$PORT"
