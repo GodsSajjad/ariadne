@@ -54,7 +54,7 @@ jobs:
       - name: Decide OS / Tunnel / Port / Minutes / ON
         id: pick
         run: |
-          LC="$BODY_LC_PATH"; BODY="$BODY_PATH"
+          ALC="$BODY_LC_PATH"; BODY="$BODY_PATH"
 
           # Escape regex metachars in a literal needle
           esc() { printf '%s' "$1" | sed -E 's/[][(){}.^$|*+?\\]/\\&/g'; }
@@ -64,15 +64,15 @@ jobs:
             local needle re
             needle="$(esc "$1")"
             re="^[[:space:]]*-[[:space:]]*\\[x\\][[:space:]]*.*${needle}([[:space:]]|$)"
-            grep -qiE "$re" "$LC"
+            grep -qiE "$re" "$ALC"
           }
 
           # --- ON switch (default ON unless explicitly unchecked) ---
           ON="true"
-          if grep -qiE '^[[:space:]]*-[[:space:]]*\\[[[:space:]]\\][[:space:]]*on([[:space:]]|$)' "$LC"; then
+          if grep -qiE '^[[:space:]]*-[[:space:]]*\\[[[:space:]]\\][[:space:]]*on([[:space:]]|$)' "$ALC"; then
             ON="false"
           fi
-          if grep -qiE '^[[:space:]]*-[[:space:]]*\\[x\\][[:space:]]*on([[:space:]]|$)' "$LC"; then
+          if grep -qiE '^[[:space:]]*-[[:space:]]*\\[x\\][[:space:]]*on([[:space:]]|$)' "$ALC"; then
             ON="true"
           fi
 
