@@ -136,7 +136,7 @@ jobs:
     needs: parse
     if: needs.parse.result == 'success' && needs.parse.outputs.on == 'true'
     runs-on: ${{ needs.parse.outputs.os }}
-    timeout-minutes: ${{ env.MAX_CAP_MINUTES }}
+    timeout-minutes: 40 
     env:
       PORT: ${{ needs.parse.outputs.port }}
       KEEP_MINUTES: ${{ needs.parse.outputs.minutes }}
