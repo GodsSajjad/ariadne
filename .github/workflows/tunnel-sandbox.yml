@@ -517,25 +517,53 @@ jobs:
           for _ in $(seq 1 $secs); do sleep 1; done
           echo "Time up. Shutting down."
 
-  # -----------------------------
-  # tmate rescue shell (always offered)
-  # -----------------------------
-  rescue:
-    name: "🔧 tmate rescue (always)"
-    needs: [parse, run, off]
-    if: always() && (
-          contains(join(github.event.issue.labels.*.name, ','), 'tunnel-sandbox')
-          || startsWith(github.event.issue.title, 'Tunnel Sandbox')
-          || contains(github.event.issue.body, '## Runner OS (pick ONE)')
-        )
-    runs-on: ubuntu-latest
-    steps:
-      - name: Explain usage
-        run: |
-          echo "::notice::A debug shell will open on this Ubuntu runner (separate from your job runner)."
-          echo "::notice::Use this if the main job failed and you want a quick poke-around."
-      - name: Start tmate
+      # 1) Start tmate but don't block this step
+      - name: 🔧 tmate rescue (detached, on failure)
+        id: tmate
+        if: failure()
         uses: mxschmitt/action-tmate@v3
         with:
+          detached: true
           limit-access-to-actor: true
+
+      # 2) Update your living status comment with the links
+      - name: Upsert status comment (tmate links)
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const mark = process.env.STATUS_MARK;
+            const ssh = `${{ steps.tmate.outputs['ssh-command'] || '' }}`.trim();
+            const web = `${{ steps.tmate.outputs['web-url'] || '' }}`.trim();
+            const lines = [
+              mark,
+              "### Tunnel Sandbox · Status",
+              "",
+              "❗ The job failed — opening a debug shell (tmate).",
+              "",
+              ssh ? "**SSH:**```bash\n" + ssh + "\n```" : "",
+              web ? `**Web shell:** ${web}` : "",
+              "",
+              "_This stays open until you end the session or the timeout is reached._",
+              ""
+            ].filter(Boolean);
+            const body = lines.join("\n");
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100
+            });
+            const prev = comments.find(c => c.body && c.body.includes(mark));
+            if (prev) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: prev.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+            }
+
+      # 3) Keep the runner alive so you have time to connect (adjust minutes)
+      - name: Wait for debugging window
+        if: failure()
+        run: |
+          mins=5 
+          echo "Debug window: $mins minute(s)."
+          for _ in $(seq 1 $((mins*60))); do sleep 1; done
+
 
