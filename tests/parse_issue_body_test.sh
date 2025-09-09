@@ -11,6 +11,8 @@ MAX_CAP_MINUTES="${MAX_CAP_MINUTES:-80}"
 # --- helpers ---
 esc() { printf '%s' "$1" | sed -E 's/[][(){}.^$|*+?\\]/\\&/g'; }
 
+# --- FIX 3: Made YAML extraction more robust ---
+# Now handles closing fence ``` on the same line as content.
 extract_yaml_block() { # stdin=markdown → first fenced ```yaml block
   awk '
     /^[[:space:]]*```[Yy][Aa][Mm][Ll]/ { in_block = 1; next }
@@ -24,9 +26,6 @@ extract_yaml_block() { # stdin=markdown → first fenced ```yaml block
   '
 }
 
-# --- FIX 1: Made awk script more portable ---
-# Switched from a gawk-specific match() to a more universal approach
-# using index() and substr() to separate keys and values.
 yaml_to_kv() { # stdin=yaml → key=value (top-level scalars)
   awk '
     BEGIN{FS=":"}
@@ -49,8 +48,6 @@ yaml_to_kv() { # stdin=yaml → key=value (top-level scalars)
     }'
 }
 
-# --- FIX 2: Made checked() regex more flexible ---
-# Changed the regex to match list items starting with either '*' or '-'.
 checked() { # $1=lc-file, $2=needle (substring is fine)
   local lcfile="$1" needle re
   needle="$(esc "$2")"
@@ -132,12 +129,10 @@ TEMPLATE=$(cat <<'MD'
 ```yaml
 port: 8080
 minutes: 40````
-
 MD
 )
 
 ALT1=$(cat <<'MD'
-
 * [ ] Ubuntu
 * [x] macos
 * [ ] windows
@@ -150,12 +145,10 @@ ALT1=$(cat <<'MD'
 port: 9090
 minutes: 5
 ```
-
 MD
 )
 
 ALT2=$(cat <<'MD'
-
 * [ ] ubuntu
 * [x] windows
 * [ ] macos
@@ -166,11 +159,39 @@ ALT2=$(cat <<'MD'
 
 ```yaml
 port: 7000
-minutes: 120
-```
-
+minutes: 120```
 MD
 )
+
+# --- New Test Cases ---
+NO_YAML=$(cat <<'MD'
+* [x] macos
+* [x] ON
+* [x] inlets pro
+MD
+)
+
+EMPTY_YAML=$(cat <<'MD'
+* [x] windows
+* [x] tor
+* [ ] ON
+```yaml
+```
+MD
+)
+
+BAD_YAML_VALS=$(cat <<'MD'
+* [x] ubuntu
+* [ ] ON
+* [x] tailscale
+
+```YAML
+PORT: "not-a-number"
+minutes: 0
+```
+MD
+)
+
 
 run_case() {
 local name="$1" body="$2" want_on="$3" want_os="$4" want_tunnel="$5" want_port="$6" want_minutes="$7"
@@ -189,5 +210,8 @@ echo "ok"
 run_case "Ubuntu + Cloudflare + ON (yaml port/minutes)" "$TEMPLATE" "true" "ubuntu-latest" "cloudflare" "8080" "40"
 run_case "macOS + lhr + OFF"                             "$ALT1"     "false" "macos-14" "localhostrun" "9090" "5"
 run_case "Windows + Tor + ON (cap minutes)"              "$ALT2"     "true"  "windows-latest" "tor" "7000" "80"
+run_case "No YAML block (all defaults)"                  "$NO_YAML" "true" "macos-14" "inlets" "8080" "40"
+run_case "Empty YAML block (all defaults)"               "$EMPTY_YAML" "false" "windows-latest" "tor" "8080" "40"
+run_case "Bad YAML values (fallback to defaults)"        "$BAD_YAML_VALS" "false" "ubuntu-latest" "tailscale" "8080" "40"
 
 echo; echo "All tests passed."
