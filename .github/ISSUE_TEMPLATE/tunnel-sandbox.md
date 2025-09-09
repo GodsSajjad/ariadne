@@ -27,7 +27,7 @@ assignees: ''
 
 ---
 
-# :spanner: Control Panel
+# 🔧 Control Panel
 
 ## Runner OS (pick ONE)
 - [x] Ubuntu (ubuntu-latest)
