@@ -336,8 +336,23 @@ jobs:
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             brew install tailscale
           elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            # The Windows installer (via Chocolatey) automatically handles the service.
             choco install tailscale -y
           fi
+
+      # --- THIS IS THE FIX ---
+      # On Linux and macOS, the service must be started manually after installation.
+      - name: Start Tailscale Service
+        if: env.TUNNEL == 'tailscale' && runner.os != 'Windows'
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo systemctl start tailscaled
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            sudo brew services start tailscale
+          fi
+          # Give the service a moment to initialize before we try to use it.
+          sleep 2
+      # ---------------------
 
       - name: Tailscale up
         if: env.TUNNEL == 'tailscale'
