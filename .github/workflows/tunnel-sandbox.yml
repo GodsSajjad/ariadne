@@ -177,7 +177,6 @@ jobs:
       KEEP_MINUTES: ${{ needs.parse.outputs.minutes }}
       TUNNEL: ${{ needs.parse.outputs.tunnel }}
       TS_HOSTNAME: "gh-runner-${{ github.run_id }}"
-      STATUS_MARK: ${{ env.STATUS_MARK }}
     steps:
       - name: Show environment
         run: |
