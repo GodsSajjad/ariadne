@@ -447,24 +447,25 @@ jobs:
         shell: powershell
         run: |
           Write-Host "Configuring and starting Tor onion service on Windows..."
-          # The path to tor.exe was saved by the previous step.
           $torExePath = $env:TOR_EXE_PATH
+          $appPort = $env:PORT
 
-          # FIX 3: Use a relative path for the Data/HiddenService dirs.
-          # This ensures Tor writes to the local, writable workspace, not C:\
+          # --- THIS IS THE FIX ---
+          # The torrc content is now corrected based on the tor manual.
+          # HiddenServicePort just maps the port, and CookieAuthentication is its own directive.
           $torrcContent = @"
           DataDirectory ./tor
           HiddenServiceDir ./tor/hidden_service
           HiddenServiceVersion 3
-          HiddenServicePort 80 12 AUTH_COOKIE ./tor/control_auth_cookie
+          HiddenServicePort 80 127.0.0.1:$appPort
           ControlPort 9051
+          CookieAuthentication 1
           "@
           Set-Content -Path "./torrc" -Value $torrcContent
 
-          # FIX 4: Start tor using the absolute path and our local torrc file.
+          Write-Host "Starting Tor process with corrected configuration..."
           Start-Process -FilePath $torExePath -ArgumentList "-f `"./torrc`"" -NoNewWindow
 
-          # The rest of the script is now correct and will run in the right context.
           Write-Host "Waiting for Onion URL from control port 9051..."
           $onion = $null
           for ($i=1; $i -le 90; $i++) {
@@ -474,15 +475,26 @@ jobs:
                 $socket = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 9051)
                 $stream = $socket.GetStream()
                 $encoder = New-Object System.Text.ASCIIEncoding
-                $authCmd = $encoder.GetBytes("AUTHENTICATE`r`n")
+                
+                # We need to read the cookie file to authenticate
+                $cookiePath = Join-Path -Path $PWD -ChildPath "tor\control_auth_cookie"
+                $cookieBytes = [System.IO.File]::ReadAllBytes($cookiePath)
+                $cookieHex = [System.BitConverter]::ToString($cookieBytes).Replace("-","")
+                
+                $authCmd = $encoder.GetBytes("AUTHENTICATE $cookieHex`r`n")
                 $stream.Write($authCmd, 0, $authCmd.Length)
-                $getInfoCmd = $encoder.GetBytes("GETINFO hs/client/onion-address`r`n")
+
+                $getInfoCmd = $encoder.GetBytes("GETINFO hs/service/list`r`n")
                 $stream.Write($getInfoCmd, 0, $getInfoCmd.Length)
-                $buffer = New-Object byte[] 1024
+
+                Start-Sleep -Milliseconds 500 # Give Tor a moment to respond
+                
+                $buffer = New-Object byte[] 4096
                 $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
                 $response = $encoder.GetString($buffer, 0, $bytesRead)
-                if ($response -match "hs/client/onion-address=(.+)") {
-                  $onion = $matches[1].Replace('"', '').Trim()
+
+                if ($response -match '250-hs/service/list=\r?\n(.+)\.onion') {
+                  $onion = $matches[1] + ".onion"
                   if ($onion -like "*.onion") {
                     Write-Host "Successfully retrieved onion URL: $onion"
                     break
