@@ -328,6 +328,7 @@ jobs:
           echo "ACCESS_NOTE=Open in a regular browser." >> $GITHUB_ENV
 
       # ------------------ Tailscale ------------------
+      # ------------------ Tailscale ------------------
       - name: Install Tailscale
         if: env.TUNNEL == 'tailscale'
         run: |
@@ -336,23 +337,20 @@ jobs:
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             brew install tailscale
           elif [[ "$RUNNER_OS" == "Windows" ]]; then
-            # The Windows installer (via Chocolatey) automatically handles the service.
             choco install tailscale -y
           fi
 
-      # --- THIS IS THE FIX ---
-      # On Linux and macOS, the service must be started manually after installation.
       - name: Start Tailscale Service
         if: env.TUNNEL == 'tailscale' && runner.os != 'Windows'
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo systemctl start tailscaled
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            sudo brew services start tailscale
+            # Using sudo is critical here
+            sudo /usr/local/bin/tailscaled > /tmp/tailscaled.log 2>&1 &
           fi
           # Give the service a moment to initialize before we try to use it.
-          sleep 2
-      # ---------------------
+          sleep 5
 
       - name: Tailscale up
         if: env.TUNNEL == 'tailscale'
@@ -369,6 +367,16 @@ jobs:
           echo "ACCESS_KIND=ssh" >> $GITHUB_ENV
           echo "ACCESS_VALUE=${TS_IP}" >> $GITHUB_ENV
           echo "ACCESS_NOTE=Paste the SSH command below in your terminal, then open the local URL." >> $GITHUB_ENV
+
+      # --- THIS IS THE FIX ---
+      # The macOS firewall blocks incoming connections by default. We must
+      # add a rule to allow traffic on the tailscale0 interface.
+      - name: Allow SSH over Tailscale (macOS)
+        if: env.TUNNEL == 'tailscale' && runner.os == 'macOS'
+        run: |
+          echo "Adding firewall rule to allow traffic on tailscale0 interface..."
+          echo "pass in on tailscale0" | sudo pfctl -f -
+          sudo pfctl -E
 
       # ------------------ Tor (Linux, macOS, Windows) ------------------
       - name: Install Tor (Linux)
