@@ -1,0 +1,425 @@
+name: Tunnel Sandbox (Cloudflare | lhr | Inlets | Tailscale | Tor)
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+env:
+  DEFAULT_PORT: "8080"
+  DEFAULT_MINUTES: "40"
+
+jobs:
+  # -----------------------------
+  # Parse user selections from issue
+  # -----------------------------
+  parse:
+    name: Parse selections
+    if: contains(join(github.event.issue.labels.*.name, ','), 'tunnel-sandbox')
+        || startsWith(github.event.issue.title, 'Tunnel Sandbox')
+        || contains(github.event.issue.body, '## Runner OS (pick ONE)')
+    runs-on: ubuntu-latest
+    outputs:
+      os: ${{ steps.pick.outputs.os }}
+      tunnel: ${{ steps.pick.outputs.tunnel }}
+      port: ${{ steps.pick.outputs.port }}
+      minutes: ${{ steps.pick.outputs.minutes }}
+    steps:
+      - name: Capture body (lowercased copy for matching)
+        id: read
+        run: |
+          BODY_FILE="$(mktemp)"
+          printf '%s' "${{ github.event.issue.body }}" > "$BODY_FILE"
+          awk '{print tolower($0)}' "$BODY_FILE" > "$BODY_FILE.lc"
+          echo "body_path=$BODY_FILE" >> "$GITHUB_OUTPUT"
+          echo "body_lc_path=$BODY_FILE.lc" >> "$GITHUB_OUTPUT"
+
+      - name: Decide OS / Tunnel / Port / Minutes
+        id: pick
+        run: |
+          LC="$BODY_LC_PATH"; BODY="$BODY_PATH"
+          checked() { grep -E -q "^\s*-\s*\[x\]\s*$1" "$LC"; }
+
+          # OS
+          OS="ubuntu-latest"
+          checked "macos"   && OS="macos-14"
+          checked "windows" && OS="windows-latest"
+          checked "ubuntu"  && OS="ubuntu-latest"
+
+          # Tunnel
+          TUNNEL=""
+          checked "cloudflare tunnel" && TUNNEL="cloudflare"
+          checked "localhost.run"     && TUNNEL="localhostrun"
+          checked "inlets pro"        && TUNNEL="inlets"
+          checked "tailscale"         && TUNNEL="tailscale"
+          checked "tor"               && TUNNEL="tor"
+          [ -z "$TUNNEL" ] && TUNNEL="cloudflare"
+
+          # Port / Minutes
+          PORT="$(grep -Ei '^\*\*Port:\*\*\s*`?([0-9]{2,5})`?' -o "$BODY" | sed -E 's/.*\*\*Port:\*\*\s*`?([0-9]{2,5})`?/\1/i' | tail -n1)"
+          [ -z "$PORT" ] && PORT="${DEFAULT_PORT}"
+          MINUTES="$(grep -Ei '^\*\*Minutes to keep running:\*\*\s*`?([0-9]{1,3})`?' -o "$BODY" | sed -E 's/.*Minutes[^0-9]*([0-9]{1,3}).*/\1/i' | tail -n1)"
+          [ -z "$MINUTES" ] && MINUTES="${DEFAULT_MINUTES}"
+
+          echo "os=$OS"          >> "$GITHUB_OUTPUT"
+          echo "tunnel=$TUNNEL"  >> "$GITHUB_OUTPUT"
+          echo "port=$PORT"      >> "$GITHUB_OUTPUT"
+          echo "minutes=$MINUTES" >> "$GITHUB_OUTPUT"
+        env:
+          BODY_PATH: ${{ steps.read.outputs.body_path }}
+          BODY_LC_PATH: ${{ steps.read.outputs.body_lc_path }}
+
+      - name: Post parsed selections
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                "**Selections parsed** ✅",
+                `- OS: \`${{ steps.pick.outputs.os }}\``,
+                `- Tunnel: \`${{ steps.pick.outputs.tunnel }}\``,
+                `- Port: \`${{ steps.pick.outputs.port }}\``,
+                `- Minutes: \`${{ steps.pick.outputs.minutes }}\``,
+              ].join("\n")
+            });
+
+  # -----------------------------
+  # Main run: server + chosen tunnel
+  # -----------------------------
+  run:
+    name: Hello World + Tunnel
+    needs: parse
+    if: needs.parse.result == 'success' && (
+          contains(join(github.event.issue.labels.*.name, ','), 'tunnel-sandbox')
+          || startsWith(github.event.issue.title, 'Tunnel Sandbox')
+          || contains(github.event.issue.body, '## Runner OS (pick ONE)')
+        )
+    runs-on: ${{ needs.parse.outputs.os }}
+    timeout-minutes: 120
+    env:
+      PORT: ${{ needs.parse.outputs.port }}
+      KEEP_MINUTES: ${{ needs.parse.outputs.minutes }}
+      TUNNEL: ${{ needs.parse.outputs.tunnel }}
+      TS_HOSTNAME: "gh-runner-${{ github.run_id }}"
+    steps:
+      - name: Show environment
+        run: |
+          echo "Runner OS: $RUNNER_OS"
+          echo "PORT=$PORT"
+          echo "KEEP_MINUTES=$KEEP_MINUTES"
+          echo "TUNNEL=$TUNNEL"
+
+      # --- Basics per OS
+      - name: Install basics (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq curl openssh-client
+
+      - name: Install basics (macOS)
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          brew install jq openssh || true
+
+      - name: Install basics (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        shell: powershell
+        run: |
+          choco install jq -y
+          choco install git -y
+
+      # --- Tiny HTTP server (Node)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Create Hello World server
+        shell: bash
+        run: |
+          cat > server.js <<'JS'
+          const http = require('http');
+          const port = process.env.PORT || 8080;
+          const server = http.createServer((req, res) => {
+            res.writeHead(200, {'content-type':'text/plain'});
+            res.end(`Hello from ${process.platform} @ ${new Date().toISOString()} on port ${port}\n`);
+          });
+          server.listen(port, '0.0.0.0', () => console.log(`Listening on ${port}`));
+          JS
+
+      - name: Start server & verify port
+        shell: bash
+        run: |
+          nohup node server.js > server.log 2>&1 &
+          for i in {1..30}; do
+            if (echo > /dev/tcp/127.0.0.1/$PORT) >/dev/null 2>&1; then
+              echo "Port $PORT is open."
+              break
+            fi
+            sleep 1
+          done
+
+      # ------------------ Cloudflare Tunnel ------------------
+      - name: Install cloudflared (Linux)
+        if: ${{ env.TUNNEL == 'cloudflare' && runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y cloudflared || {
+            curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cf.deb
+            sudo dpkg -i cf.deb || true
+          }
+          cloudflared --version || true
+
+      - name: Install cloudflared (macOS)
+        if: ${{ env.TUNNEL == 'cloudflare' && runner.os == 'macOS' }}
+        run: |
+          brew install cloudflared || true
+          cloudflared --version || true
+
+      - name: Install cloudflared (Windows)
+        if: ${{ env.TUNNEL == 'cloudflare' && runner.os == 'Windows' }}
+        shell: powershell
+        run: |
+          choco install cloudflared -y
+          cloudflared --version
+
+      - name: Start Cloudflare Tunnel
+        if: ${{ env.TUNNEL == 'cloudflare' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > cloudflared.log
+          (cloudflared tunnel --url "http://127.0.0.1:${PORT}" --no-autoupdate >> cloudflared.log 2>&1) &
+          URL=""
+          for i in {1..60}; do
+            URL="$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' cloudflared.log | tail -n1 || true)"
+            [ -n "$URL" ] && break
+            sleep 1
+          done
+          echo "PUBLIC_URL=${URL}" >> $GITHUB_ENV
+
+      # ------------------ localhost.run ------------------
+      - name: Start localhost.run (SSH reverse)
+        if: ${{ env.TUNNEL == 'localhostrun' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > lhr.json
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+              -R 80:127.0.0.1:${PORT} nokey@localhost.run -- --output json > lhr.json 2>&1 &
+          URL=""
+          for i in {1..60}; do
+            URL="$(jq -r '
+              select(.event=="tcpip-forward" and .status=="success")
+              | ((.tls_termination // false) as $tls |
+                 ($tls | if . then "https://" else "http://" end) + (.address // .listen_host // ""))
+            ' lhr.json 2>/dev/null | tail -n1 || true)"
+            [ -n "$URL" ] && break
+            sleep 1
+          done
+          echo "PUBLIC_URL=${URL}" >> $GITHUB_ENV
+
+      # ------------------ Inlets PRO ------------------
+      - name: Check Inlets secrets
+        if: ${{ env.TUNNEL == 'inlets' }}
+        shell: bash
+        env:
+          INLETS_REMOTE: ${{ secrets.INLETS_REMOTE }}
+          INLETS_TOKEN: ${{ secrets.INLETS_TOKEN }}
+          INLETS_LICENSE: ${{ secrets.INLETS_LICENSE }}
+        run: |
+          missing=0
+          for v in INLETS_REMOTE INLETS_TOKEN INLETS_LICENSE; do
+            if [ -z "${!v:-}" ]; then echo "Missing secret: $v"; missing=1; fi
+          done
+          exit $missing
+
+      - name: Install Inlets PRO (Linux)
+        if: ${{ env.TUNNEL == 'inlets' && runner.os == 'Linux' }}
+        run: |
+          curl -sLS https://github.com/inlets/inlets-pro/releases/latest/download/inlets-pro-linux-amd64.tgz -o inlets.tgz || true
+          tar -xzf inlets.tgz || true
+          [ -f inlets-pro ] && sudo mv inlets-pro /usr/local/bin/ || true
+          inlets-pro version || true
+
+      - name: Install Inlets PRO (macOS)
+        if: ${{ env.TUNNEL == 'inlets' && runner.os == 'macOS' }}
+        run: |
+          curl -sLS https://github.com/inlets/inlets-pro/releases/latest/download/inlets-pro-darwin-amd64.tgz -o inlets.tgz || true
+          tar -xzf inlets.tgz || true
+          [ -f inlets-pro ] && sudo mv inlets-pro /usr/local/bin/ || true
+          inlets-pro version || true
+
+      - name: Install Inlets PRO (Windows)
+        if: ${{ env.TUNNEL == 'inlets' && runner.os == 'Windows' }}
+        shell: powershell
+        run: |
+          choco install inlets-pro -y || echo "Note: Chocolatey package may not exist for all versions."
+
+      - name: Start Inlets PRO client
+        if: ${{ env.TUNNEL == 'inlets' }}
+        shell: bash
+        env:
+          INLETS_REMOTE: ${{ secrets.INLETS_REMOTE }}
+          INLETS_TOKEN: ${{ secrets.INLETS_TOKEN }}
+          INLETS_LICENSE: ${{ secrets.INLETS_LICENSE }}
+          INLETS_PUBLIC_URL: ${{ secrets.INLETS_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          : > inlets.log
+          ( inlets-pro http client \
+              --url "${INLETS_REMOTE}" \
+              --token "${INLETS_TOKEN}" \
+              --upstream "http://127.0.0.1:${PORT}" \
+              --license "${INLETS_LICENSE}" \
+              --auto-tls ) >> inlets.log 2>&1 &
+          echo "PUBLIC_URL=${INLETS_PUBLIC_URL:-}" >> $GITHUB_ENV
+
+      # ------------------ Tailscale ------------------
+      - name: Install Tailscale (Linux)
+        if: ${{ env.TUNNEL == 'tailscale' && runner.os == 'Linux' }}
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Install Tailscale (macOS)
+        if: ${{ env.TUNNEL == 'tailscale' && runner.os == 'macOS' }}
+        run: |
+          brew install tailscale || true
+
+      - name: Install Tailscale (Windows)
+        if: ${{ env.TUNNEL == 'tailscale' && runner.os == 'Windows' }}
+        shell: powershell
+        run: |
+          choco install tailscale -y
+
+      - name: Tailscale up (with TS-SSH)
+        if: ${{ env.TUNNEL == 'tailscale' }}
+        run: |
+          sudo tailscale up \
+            --authkey="${{ secrets.TAILSCALE_AUTHKEY }}" \
+            --hostname="${TS_HOSTNAME}" \
+            --ssh \
+            --accept-dns=false
+          tailscale ip -4 | head -n1 > ts.ipv4
+          echo "TS_IP=$(cat ts.ipv4)" >> $GITHUB_ENV
+
+      # ------------------ Tor (optional) ------------------
+      - name: Install Tor (Linux)
+        if: ${{ env.TUNNEL == 'tor' && runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y tor
+
+      - name: Start onion service
+        if: ${{ env.TUNNEL == 'tor' && runner.os == 'Linux' }}
+        run: |
+          mkdir -p tor/hidden_service
+          chmod 700 tor/hidden_service
+          cat > tor/torrc <<EOF
+          Log notice stdout
+          DataDirectory ./tor
+          HiddenServiceDir ./tor/hidden_service
+          HiddenServiceVersion 3
+          HiddenServicePort 80 127.0.0.1:${PORT}
+          EOF
+          (tor -f tor/torrc > tor/tor.log 2>&1 &) && sleep 5
+          for i in {1..60}; do [ -f tor/hidden_service/hostname ] && break; sleep 1; done
+          echo "PUBLIC_URL=$(cat tor/hidden_service/hostname || true)" >> $GITHUB_ENV
+
+      # ------------------ Friendly comment ------------------
+      - name: Comment access instructions
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          PUBLIC_URL: ${{ env.PUBLIC_URL }}
+          TUNNEL: ${{ env.TUNNEL }}
+          PORT: ${{ env.PORT }}
+          RUNNER_OS: ${{ runner.os }}
+          TS_IP: ${{ env.TS_IP }}
+        with:
+          script: |
+            const tun = process.env.TUNNEL || "";
+            const url = process.env.PUBLIC_URL || "";
+            const port = process.env.PORT || "8080";
+            const os  = process.env.RUNNER_OS || "Linux";
+            const tsip = process.env.TS_IP || "";
+
+            const userLinux = "runner";      // GitHub-hosted
+            const userMac   = "runner";
+            const userWin   = "runneradmin";
+            const user = (os === "Windows") ? userWin : (os === "macOS" ? userMac : userLinux);
+
+            let body = `### Access details (${tun})\n`;
+            if (tun === "cloudflare" || tun === "localhostrun" || tun === "inlets") {
+              body += url
+                ? `**Public URL:** ${url}\n`
+                : `**Tunnel starting...** Check logs for URL.\n`;
+            } else if (tun === "tailscale") {
+              if (tsip) {
+                const fwd = 8443;
+                body += [
+                  `**Tailscale IP:** \`${tsip}\``,
+                  "",
+                  "Copy-paste to forward locally, then open your browser:",
+                  "```bash",
+                  `ssh -N -L ${fwd}:127.0.0.1:${port} ${user}@${tsip}`,
+                  `# then open: http://localhost:${fwd}`,
+                  "```",
+                  "_You must be logged into the same tailnet. TS-SSH is enabled; no OpenSSH server required._"
+                ].join("\n");
+              } else {
+                body += `Tailscale is initializing; no IP yet. Check job logs.`;
+              }
+            } else if (tun === "tor") {
+              body += url
+                ? `**.onion:** \`${url}\`\nOpen in Tor Browser.`
+                : `**Tor starting...** onion not ready yet.`;
+            }
+
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+
+      # ------------------ Keep session alive ------------------
+      - name: Keep session alive
+        shell: bash
+        run: |
+          secs=$(( KEEP_MINUTES * 60 ))
+          echo "Keeping the session alive for $KEEP_MINUTES minute(s)..."
+          for _ in $(seq 1 $secs); do sleep 1; done
+          echo "Time up. Shutting down."
+
+  # -----------------------------
+  # tmate rescue shell (always offered)
+  # -----------------------------
+  rescue:
+    name: "🔧 tmate rescue (always)"
+    needs: [parse, run]
+    if: always() && (
+          contains(join(github.event.issue.labels.*.name, ','), 'tunnel-sandbox')
+          || startsWith(github.event.issue.title, 'Tunnel Sandbox')
+          || contains(github.event.issue.body, '## Runner OS (pick ONE)')
+        )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain usage
+        run: |
+          echo "::notice::A debug shell will open on this Ubuntu runner (separate from your job runner)."
+          echo "::notice::Use this if the main job failed and you want a quick poke-around."
+      - name: Start tmate
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
