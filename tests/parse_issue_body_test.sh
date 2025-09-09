@@ -13,10 +13,14 @@ esc() { printf '%s' "$1" | sed -E 's/[][(){}.^$|*+?\\]/\\&/g'; }
 
 extract_yaml_block() { # stdin=markdown → first fenced ```yaml block
   awk '
-    BEGIN{inside=0}
-    /^[[:space:]]*```[Yy][Aa][Mm][Ll][[:space:]]*$/ {inside=1; next}
-    inside && /^[[:space:]]*```[[:space:]]*$/ {inside=0; exit}
-    inside {print}
+    /^[[:space:]]*```[Yy][Aa][Mm][Ll]/ { in_block = 1; next }
+    in_block {
+      if (index($0, "```") > 0) {
+        print substr($0, 1, index($0, "```") - 1)
+        exit
+      }
+      print
+    }
   '
 }
 
