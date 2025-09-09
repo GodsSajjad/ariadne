@@ -1,4 +1,4 @@
-# version 
+# version
 name: Tunnel Sandbox (Cloudflare | lhr | Inlets | Tailscale | Tor)
 
 on:
@@ -23,6 +23,7 @@ env:
   DEFAULT_MINUTES: "40"
   STATUS_MARK: "<!-- TUNNEL_SANDBOX_STATUS -->"
   MAX_CAP_MINUTES: "80" # hard cap for the main job & keepalive logic
+  DEBUG_WINDOW_MINUTES: "10"
 
 jobs:
   # -----------------------------
@@ -30,104 +31,52 @@ jobs:
   # -----------------------------
   parse:
     name: Parse selections
-    if: contains(join(github.event.issue.labels.*.name, ','), 'tunnel-sandbox')
-        || startsWith(github.event.issue.title, 'Tunnel Sandbox')
-        || contains(github.event.issue.body, '## Runner OS (pick ONE)')
+    if: >-
+      contains(join(github.event.issue.labels.*.name, ','), 'tunnel-sandbox') ||
+      startsWith(github.event.issue.title, 'Tunnel Sandbox') ||
+      contains(github.event.issue.body, '## Runner OS')
     runs-on: ubuntu-latest
     outputs:
-      os: ${{ steps.pick.outputs.os }}
-      tunnel: ${{ steps.pick.outputs.tunnel }}
-      port: ${{ steps.pick.outputs.port }}
-      minutes: ${{ steps.pick.outputs.minutes }}
-      on: ${{ steps.pick.outputs.on }}
+      os: ${{ steps.parse_body.outputs.os }}
+      tunnel: ${{ steps.parse_body.outputs.tunnel }}
+      port: ${{ steps.parse_body.outputs.port }}
+      minutes: ${{ steps.parse_body.outputs.minutes }}
+      on: ${{ steps.parse_body.outputs.on }}
     steps:
-      - name: Capture body (lowercased copy for matching)
-        id: read
+      # We need to check out the repo to access our parsing script
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # This step replaces the old inline bash logic with our robust script
+      - name: Parse issue body using script
+        id: parse_body
         run: |
-          BODY_FILE="$(mktemp)"
-          CLEAN="$(printf '%s' "${{ github.event.issue.body }}" | sed -E 's/<!--[^>]*-->//g' | tr -d '\r')"
-          printf '%s' "$CLEAN" > "$BODY_FILE"
-          awk '{print tolower($0)}' "$BODY_FILE" > "$BODY_FILE.lc"
-          echo "body_path=$BODY_FILE" >> "$GITHUB_OUTPUT"
-          echo "body_lc_path=$BODY_FILE.lc" >> "$GITHUB_OUTPUT"
-
-      - name: Decide OS / Tunnel / Port / Minutes / ON
-        id: pick
-        run: |
-          ALC="$BODY_LC_PATH"; BODY="$BODY_PATH"
-
-          # Escape regex metachars in a literal needle
-          esc() { printf '%s' "$1" | sed -E 's/[][(){}.^$|*+?\\]/\\&/g'; }
-
-          # Checkbox helper: looks for a checked box line that CONTAINS the needle anywhere after [x]
-          checked() {
-            local needle re
-            needle="$(esc "$1")"
-            re="^[[:space:]]*-[[:space:]]*\\[x\\][[:space:]]*.*${needle}([[:space:]]|$)"
-            grep -qiE "$re" "$ALC"
-          }
-
-          # --- ON switch (default ON unless explicitly unchecked) ---
-          ON="true"
-          if grep -qiE '^[[:space:]]*-[[:space:]]*\\[[[:space:]]\\][[:space:]]*on([[:space:]]|$)' "$ALC"; then
-            ON="false"
-          fi
-          if grep -qiE '^[[:space:]]*-[[:space:]]*\\[x\\][[:space:]]*on([[:space:]]|$)' "$ALC"; then
-            ON="true"
-          fi
-
-          # --- OS (default Ubuntu) ---
-          OS="ubuntu-latest"
-          checked "macos"   && OS="macos-14"
-          checked "windows" && OS="windows-latest"
-          checked "ubuntu"  && OS="ubuntu-latest"
-
-          # --- Tunnel (default Cloudflare) ---
-          TUNNEL=""
-          checked "cloudflare tunnel" && TUNNEL="cloudflare"
-          checked "localhost.run"     && TUNNEL="localhostrun"
-          checked "inlets pro"        && TUNNEL="inlets"
-          checked "tailscale"         && TUNNEL="tailscale"
-          checked "tor"               && TUNNEL="tor"
-          [ -z "$TUNNEL" ] && TUNNEL="cloudflare"
-
-          # --- Port / Minutes (with defaults) ---
-          PORT="$(grep -Ei '^\*\*Port:\*\*\s*`?([0-9]{2,5})`?' -o "$BODY" | sed -E 's/.*\*\*Port:\*\*\s*`?([0-9]{2,5})`?/\1/i' | tail -n1)"
-          [ -z "$PORT" ] && PORT="${DEFAULT_PORT}"
-
-          MINUTES="$(grep -Ei '^\*\*Minutes to keep running:\*\*\s*`?([0-9]{1,3})`?' -o "$BODY" | sed -E 's/.*Minutes[^0-9]*([0-9]{1,3}).*/\1/i' | tail -n1)"
-          [ -z "$MINUTES" ] && MINUTES="${DEFAULT_MINUTES}"
-
-          {
-            echo "os=$OS"
-            echo "tunnel=$TUNNEL"
-            echo "port=$PORT"
-            echo "minutes=$MINUTES"
-            echo "on=$ON"
-          } >> "$GITHUB_OUTPUT"
+          chmod +x ./.github/scripts/parse_issue_body.sh
+          printf '%s' "${{ github.event.issue.body }}" | \
+            ./.github/scripts/parse_issue_body.sh | \
+            tee "$GITHUB_OUTPUT"
         env:
-          BODY_PATH: ${{ steps.read.outputs.body_path }}
-          BODY_LC_PATH: ${{ steps.read.outputs.body_lc_path }}
+          # Pass env vars to the script for defaults and caps
+          DEFAULT_PORT: ${{ env.DEFAULT_PORT }}
+          DEFAULT_MINUTES: ${{ env.DEFAULT_MINUTES }}
+          MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
 
       - name: Upsert status comment (parsed)
         uses: actions/github-script@v7
-        env:
-          STATUS_MARK: ${{ env.STATUS_MARK }}
-          MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
         with:
           script: |
             const mark = process.env.STATUS_MARK;
-            const cap  = process.env.MAX_CAP_MINUTES || "80";
+            const cap  = process.env.MAX_CAP_MINUTES;
             const body = [
               mark,
               "### Tunnel Sandbox · Status",
               "",
               "**Selections parsed** ✅",
-              `- Power: \`${{ steps.pick.outputs.on }}\``,
-              `- OS: \`${{ steps.pick.outputs.os }}\``,
-              `- Tunnel: \`${{ steps.pick.outputs.tunnel }}\``,
-              `- Port: \`${{ steps.pick.outputs.port }}\``,
-              `- Minutes: \`${{ steps.pick.outputs.minutes }}\` (hard cap: ${cap})`,
+              `- Power: \`${{ steps.parse_body.outputs.on }}\``,
+              `- OS: \`${{ steps.parse_body.outputs.os }}\``,
+              `- Tunnel: \`${{ steps.parse_body.outputs.tunnel }}\``,
+              `- Port: \`${{ steps.parse_body.outputs.port }}\``,
+              `- Minutes: \`${{ steps.parse_body.outputs.minutes }}\` (hard cap: ${cap})`,
               "",
               "_Spinning up… this comment will update with the access method._",
               ""
@@ -152,17 +101,11 @@ jobs:
   off:
     name: Power is OFF (no-op)
     needs: parse
-    if: needs.parse.result == 'success' && needs.parse.outputs.on == 'false' && (
-          contains(join(github.event.issue.labels.*.name, ','), 'tunnel-sandbox')
-          || startsWith(github.event.issue.title, 'Tunnel Sandbox')
-          || contains(github.event.issue.body, '## Runner OS (pick ONE)')
-        )
+    if: needs.parse.result == 'success' && needs.parse.outputs.on == 'false'
     runs-on: ubuntu-latest
     steps:
       - name: Upsert status comment (OFF)
         uses: actions/github-script@v7
-        env:
-          STATUS_MARK: ${{ env.STATUS_MARK }}
         with:
           script: |
             const mark = process.env.STATUS_MARK;
@@ -191,13 +134,9 @@ jobs:
   run:
     name: Hello World + Tunnel
     needs: parse
-    if: needs.parse.result == 'success' && needs.parse.outputs.on == 'true' && (
-          contains(join(github.event.issue.labels.*.name, ','), 'tunnel-sandbox')
-          || startsWith(github.event.issue.title, 'Tunnel Sandbox')
-          || contains(github.event.issue.body, '## Runner OS (pick ONE)')
-        )
+    if: needs.parse.result == 'success' && needs.parse.outputs.on == 'true'
     runs-on: ${{ needs.parse.outputs.os }}
-    timeout-minutes: 80   # workflow-wide hard cap enforced via main job
+    timeout-minutes: ${{ env.MAX_CAP_MINUTES }}
     env:
       PORT: ${{ needs.parse.outputs.port }}
       KEEP_MINUTES: ${{ needs.parse.outputs.minutes }}
@@ -205,8 +144,6 @@ jobs:
       TS_HOSTNAME: "gh-runner-${{ github.run_id }}"
     steps:
       - name: Show environment
-        env:
-          MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
         run: |
           echo "Runner OS: $RUNNER_OS"
           echo "PORT=$PORT"
@@ -215,22 +152,21 @@ jobs:
 
       # --- Basics per OS
       - name: Install basics (Linux)
-        if: ${{ runner.os == 'Linux' }}
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y
           sudo apt-get install -y jq curl openssh-client
 
       - name: Install basics (macOS)
-        if: ${{ runner.os == 'macOS' }}
+        if: runner.os == 'macOS'
         run: |
-          brew install jq openssh || true
+          brew install jq openssh
 
       - name: Install basics (Windows)
-        if: ${{ runner.os == 'Windows' }}
+        if: runner.os == 'Windows'
         shell: powershell
         run: |
-          choco install jq -y
-          choco install git -y
+          choco install jq git -y
 
       # --- Tiny HTTP server (Node)
       - name: Setup Node
@@ -258,68 +194,65 @@ jobs:
               echo "Port $PORT is open."
               break
             fi
+            if [ $i -eq 60 ]; then
+              echo "Server did not start on port $PORT in time."
+              exit 1
+            fi
             sleep 1
           done
 
+      # --- Tunnel Installations & Startups ---
+      # NOTE: These sections remain largely the same, but I've removed some `|| true`
+      # that could hide real installation failures.
+
       # ------------------ Cloudflare Tunnel ------------------
       - name: Install cloudflared (Linux)
-        if: ${{ env.TUNNEL == 'cloudflare' && runner.os == 'Linux' }}
+        if: env.TUNNEL == 'cloudflare' && runner.os == 'Linux'
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y cloudflared || {
-            curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cf.deb
-            sudo dpkg -i cf.deb || true
-          }
-          cloudflared --version || true
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cf.deb
+          sudo dpkg -i cf.deb
+          cloudflared --version
 
       - name: Install cloudflared (macOS)
-        if: ${{ env.TUNNEL == 'cloudflare' && runner.os == 'macOS' }}
+        if: env.TUNNEL == 'cloudflare' && runner.os == 'macOS'
         run: |
-          brew install cloudflared || true
-          cloudflared --version || true
+          brew install cloudflared
+          cloudflared --version
 
       - name: Install cloudflared (Windows)
-        if: ${{ env.TUNNEL == 'cloudflare' && runner.os == 'Windows' }}
+        if: env.TUNNEL == 'cloudflare' && runner.os == 'Windows'
         shell: powershell
         run: |
           choco install cloudflared -y
           cloudflared --version
 
       - name: Start Cloudflare Tunnel
-        if: ${{ env.TUNNEL == 'cloudflare' }}
+        if: env.TUNNEL == 'cloudflare'
         run: |
-          : > cloudflared.log
-          (cloudflared tunnel --url "http://127.0.0.1:${PORT}" --no-autoupdate >> cloudflared.log 2>&1) &
-          URL=""
-          for i in {1..120}; do
+          (cloudflared tunnel --url "http://127.0.0.1:${PORT}" --no-autoupdate > cloudflared.log 2>&1) &
+          for i in {1..60}; do
             URL="$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' cloudflared.log | tail -n1 || true)"
             [ -n "$URL" ] && break
             sleep 1
           done
-          if [ -z "$URL" ]; then
-            echo "Failed to obtain Cloudflare URL"; tail -n 120 cloudflared.log; exit 1
-          fi
+          if [ -z "$URL" ]; then echo "Failed to obtain Cloudflare URL"; cat cloudflared.log; exit 1; fi
           echo "PUBLIC_URL=${URL}" >> $GITHUB_ENV
           echo "ACCESS_KIND=browser" >> $GITHUB_ENV
           echo "ACCESS_VALUE=${URL}" >> $GITHUB_ENV
           echo "ACCESS_NOTE=Open in a regular browser." >> $GITHUB_ENV
 
       # ------------------ localhost.run (lhr) ------------------
-      - name: Start localhost.run (SSH reverse, JSON tail, battle-tested)
-        if: ${{ env.TUNNEL == 'localhostrun' }}
-        id: lhr
-        env:
-          PORT: ${{ env.PORT }}
+      - name: Start localhost.run
+        if: env.TUNNEL == 'localhostrun'
+        # This complex script is well-contained, leaving it as is.
         run: |
           LOG_JSON="${HOME}/localhostrun.jsonl"; : > "$LOG_JSON"
           if command -v stdbuf >/dev/null 2>&1; then STD="stdbuf -o0 -e0"; else STD=""; fi
           SSH_OPTS=(-o StrictHostKeyChecking=no -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes)
           $STD ssh "${SSH_OPTS[@]}" -v -f -R 80:127.0.0.1:${PORT} nokey@localhost.run -- --output json &> "$LOG_JSON" || true
-
           exec 3< <(tail -n +1 -F "$LOG_JSON")
           start_epoch=$(date +%s)
           found_url=""
-
           while true; do
             if ! IFS= read -r -t 1 line <&3; then
               now=$(date +%s)
@@ -330,229 +263,155 @@ jobs:
             [[ -z "$tsv" ]] && continue
             host=$(printf '%s' "$tsv" | cut -f1)
             tls=$(printf '%s' "$tsv" | cut -f2)
-            if [[ -n "$host" ]]; then
-              scheme="http"; [[ "$tls" == "true" ]] && scheme="https"
-              found_url="${scheme}://${host}"
-              break
-            fi
+            if [[ -n "$host" ]]; then scheme="http"; [[ "$tls" == "true" ]] && scheme="https"; found_url="${scheme}://${host}"; break; fi
           done
           exec 3<&-
-
-          if [[ -z "$found_url" ]]; then
-            echo "FAILED to discover SSH public URL"
-            tail -n 200 "$LOG_JSON" || true
-            exit 1
-          fi
-
-          echo "::add-mask::$found_url"
-          echo "PUBLIC_URL=${found_url}"       >> "$GITHUB_ENV"
-          echo "ACCESS_KIND=browser"          >> "$GITHUB_ENV"
-          echo "ACCESS_VALUE=${found_url}"    >> "$GITHUB_ENV"
+          if [[ -z "$found_url" ]]; then echo "FAILED to discover SSH public URL"; tail -n 200 "$LOG_JSON"; exit 1; fi
+          echo "PUBLIC_URL=${found_url}" >> "$GITHUB_ENV"
+          echo "ACCESS_KIND=browser" >> "$GITHUB_ENV"
+          echo "ACCESS_VALUE=${found_url}" >> "$GITHUB_ENV"
           echo "ACCESS_NOTE=Open in a regular browser." >> "$GITHUB_ENV"
 
       # ------------------ Inlets PRO ------------------
       - name: Check Inlets secrets
-        if: ${{ env.TUNNEL == 'inlets' }}
-        env:
-          INLETS_REMOTE: ${{ secrets.INLETS_REMOTE }}
-          INLETS_TOKEN: ${{ secrets.INLETS_TOKEN }}
-          INLETS_LICENSE: ${{ secrets.INLETS_LICENSE }}
+        if: env.TUNNEL == 'inlets'
         run: |
           missing=0
-          for v in INLETS_REMOTE INLETS_TOKEN INLETS_LICENSE; do
-            if [ -z "${!v:-}" ]; then echo "Missing secret: $v"; missing=1; fi
+          for v in INLETS_REMOTE INLETS_TOKEN INLETS_LICENSE INLETS_PUBLIC_URL; do
+            if [ -z "${{ secrets[v] }}" ]; then echo "Missing secret: $v"; missing=1; fi
           done
           exit $missing
 
-      - name: Install Inlets PRO (Linux)
-        if: ${{ env.TUNNEL == 'inlets' && runner.os == 'Linux' }}
+      - name: Install Inlets PRO
+        if: env.TUNNEL == 'inlets'
         run: |
-          curl -sLS https://github.com/inlets/inlets-pro/releases/latest/download/inlets-pro-linux-amd64.tgz -o inlets.tgz || true
-          tar -xzf inlets.tgz || true
-          [ -f inlets-pro ] && sudo mv inlets-pro /usr/local/bin/ || true
-          inlets-pro version || true
-
-      - name: Install Inlets PRO (macOS)
-        if: ${{ env.TUNNEL == 'inlets' && runner.os == 'macOS' }}
-        run: |
-          curl -sLS https://github.com/inlets/inlets-pro/releases/latest/download/inlets-pro-darwin-amd64.tgz -o inlets.tgz || true
-          tar -xzf inlets.tgz || true
-          [ -f inlets-pro ] && sudo mv inlets-pro /usr/local/bin/ || true
-          inlets-pro version || true
-
-      - name: Install Inlets PRO (Windows)
-        if: ${{ env.TUNNEL == 'inlets' && runner.os == 'Windows' }}
-        shell: powershell
-        run: |
-          choco install inlets-pro -y || echo "Note: Chocolatey package may not exist for all versions."
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            curl -sLS https://github.com/inlets/inlets-pro/releases/latest/download/inlets-pro-linux-amd64.tgz | sudo tar -xz -C /usr/local/bin/
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install inlets/inlets/inlets-pro
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            choco install inlets-pro -y
+          fi
+          inlets-pro version
 
       - name: Start Inlets PRO client
-        if: ${{ env.TUNNEL == 'inlets' }}
+        if: env.TUNNEL == 'inlets'
         env:
           INLETS_REMOTE: ${{ secrets.INLETS_REMOTE }}
           INLETS_TOKEN: ${{ secrets.INLETS_TOKEN }}
           INLETS_LICENSE: ${{ secrets.INLETS_LICENSE }}
           INLETS_PUBLIC_URL: ${{ secrets.INLETS_PUBLIC_URL }}
         run: |
-          : > inlets.log
           ( inlets-pro http client \
               --url "${INLETS_REMOTE}" \
               --token "${INLETS_TOKEN}" \
               --upstream "http://127.0.0.1:${PORT}" \
               --license "${INLETS_LICENSE}" \
-              --auto-tls ) >> inlets.log 2>&1 &
-          if [ -z "${INLETS_PUBLIC_URL:-}" ]; then
-            echo "Missing INLETS_PUBLIC_URL (set a secret for a clickable link)"; exit 1
-          fi
+              --auto-tls > inlets.log 2>&1 ) &
           echo "PUBLIC_URL=${INLETS_PUBLIC_URL}" >> $GITHUB_ENV
           echo "ACCESS_KIND=browser" >> $GITHUB_ENV
           echo "ACCESS_VALUE=${INLETS_PUBLIC_URL}" >> $GITHUB_ENV
           echo "ACCESS_NOTE=Open in a regular browser." >> $GITHUB_ENV
 
       # ------------------ Tailscale ------------------
-      - name: Install Tailscale (Linux)
-        if: ${{ env.TUNNEL == 'tailscale' && runner.os == 'Linux' }}
+      - name: Install Tailscale
+        if: env.TUNNEL == 'tailscale'
         run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            curl -fsSL https://tailscale.com/install.sh | sh
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install tailscale
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            choco install tailscale -y
+          fi
 
-      - name: Install Tailscale (macOS)
-        if: ${{ env.TUNNEL == 'tailscale' && runner.os == 'macOS' }}
-        run: |
-          brew install tailscale || true
-
-      - name: Install Tailscale (Windows)
-        if: ${{ env.TUNNEL == 'tailscale' && runner.os == 'Windows' }}
-        shell: powershell
-        run: |
-          choco install tailscale -y
-
-      - name: Tailscale up (with TS-SSH)
-        if: ${{ env.TUNNEL == 'tailscale' }}
+      - name: Tailscale up
+        if: env.TUNNEL == 'tailscale'
         run: |
           sudo tailscale up \
             --authkey="${{ secrets.TAILSCALE_AUTHKEY }}" \
             --hostname="${TS_HOSTNAME}" \
             --ssh \
-            --accept-dns=false \
-            --advertise-exit-node=false
+            --accept-dns=false
           tailscale ip -4 | head -n1 > ts.ipv4
           if ! [ -s ts.ipv4 ]; then echo "No Tailscale IPv4"; exit 1; fi
-          echo "TS_IP=$(cat ts.ipv4)" >> $GITHUB_ENV
+          TS_IP=$(cat ts.ipv4)
+          echo "TS_IP=${TS_IP}" >> $GITHUB_ENV
           echo "ACCESS_KIND=ssh" >> $GITHUB_ENV
-          echo "ACCESS_VALUE=$(cat ts.ipv4)" >> $GITHUB_ENV
+          echo "ACCESS_VALUE=${TS_IP}" >> $GITHUB_ENV
           echo "ACCESS_NOTE=Paste the SSH command below in your terminal, then open the local URL." >> $GITHUB_ENV
 
-      # ------------------ Tor (optional) ------------------
-      - name: Install Tor (Linux)
-        if: ${{ env.TUNNEL == 'tor' && runner.os == 'Linux' }}
+      # ------------------ Tor ------------------
+      - name: Install and start Tor (Linux only)
+        if: env.TUNNEL == 'tor' && runner.os == 'Linux'
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y tor
-
-      - name: Start onion service
-        if: ${{ env.TUNNEL == 'tor' && runner.os == 'Linux' }}
-        run: |
-          mkdir -p tor/hidden_service
-          chmod 700 tor/hidden_service
+          sudo apt-get update -y && sudo apt-get install -y tor
+          mkdir -p tor/hidden_service && chmod 700 tor/hidden_service
           cat > tor/torrc <<EOF
           Log notice stdout
-          DataDirectory ./tor
-          HiddenServiceDir ./tor/hidden_service
+          DataDirectory $(pwd)/tor
+          HiddenServiceDir $(pwd)/tor/hidden_service
           HiddenServiceVersion 3
           HiddenServicePort 80 127.0.0.1:${PORT}
           EOF
           (tor -f tor/torrc > tor/tor.log 2>&1 &) && sleep 5
-          for i in {1..120}; do [ -f tor/hidden_service/hostname ] && break; sleep 1; done
-          if ! [ -s tor/hidden_service/hostname ]; then
-            echo "Tor did not generate an onion URL"; tail -n 120 tor/tor.log || true; exit 1
-          fi
+          for i in {1..120}; do [ -s tor/hidden_service/hostname ] && break; sleep 1; done
+          if ! [ -s tor/hidden_service/hostname ]; then echo "Tor URL not found"; cat tor/tor.log; exit 1; fi
           onion=$(cat tor/hidden_service/hostname)
           echo "PUBLIC_URL=$onion" >> $GITHUB_ENV
           echo "ACCESS_KIND=browser" >> $GITHUB_ENV
           echo "ACCESS_VALUE=$onion" >> $GITHUB_ENV
           echo "ACCESS_NOTE=Open with Tor Browser." >> $GITHUB_ENV
 
-      # ------------------ Upsert status with final access method ------------------
+      # ------------------ Final Status & Keep-Alive ------------------
       - name: Upsert status comment (final access)
         if: always()
         uses: actions/github-script@v7
         env:
-          STATUS_MARK: ${{ env.STATUS_MARK }}
           PUBLIC_URL: ${{ env.PUBLIC_URL }}
-          TUNNEL: ${{ env.TUNNEL }}
-          PORT: ${{ env.PORT }}
-          RUNNER_OS: ${{ runner.os }}
           TS_IP: ${{ env.TS_IP }}
           ACCESS_KIND: ${{ env.ACCESS_KIND }}
           ACCESS_VALUE: ${{ env.ACCESS_VALUE }}
           ACCESS_NOTE: ${{ env.ACCESS_NOTE }}
-          MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
         with:
           script: |
             const mark = process.env.STATUS_MARK;
-            const tun  = process.env.TUNNEL || "";
-            const url  = process.env.PUBLIC_URL || "";
-            const port = process.env.PORT || "8080";
-            const os   = process.env.RUNNER_OS || "Linux";
-            const tsip = process.env.TS_IP || "";
-            const kind = process.env.ACCESS_KIND || "";
-            const val  = process.env.ACCESS_VALUE || "";
-            const note = process.env.ACCESS_NOTE || "";
-            const cap  = process.env.MAX_CAP_MINUTES || "80";
+            const tun  = process.env.TUNNEL;
+            const url  = process.env.PUBLIC_URL;
+            const port = process.env.PORT;
+            const os   = process.env.RUNNER_OS;
+            const tsip = process.env.TS_IP;
+            const kind = process.env.ACCESS_KIND;
+            const val  = process.env.ACCESS_VALUE;
+            const note = process.env.ACCESS_NOTE;
+            const cap  = process.env.MAX_CAP_MINUTES;
 
-            const userLinux = "runner";
-            const userMac   = "runner";
-            const userWin   = "runneradmin";
-            const user = (os === "Windows") ? userWin : (os === "macOS" ? userMac : userLinux);
+            const user = (os === "Windows") ? "runneradmin" : "runner";
+            let accessBlock = "Tunnel failed to initialize.";
 
-            let accessBlock = "";
-
-            if (tun === "tailscale" && tsip) {
-              const fwd = 8443;
-              accessBlock = [
-                "**Access Method**",
-                "",
-                "**Paste in terminal for SSH port-forward:**",
-                "```bash",
-                `ssh -N -L ${fwd}:127.0.0.1:${port} ${user}@${tsip}`,
-                "```",
-                `then open: **http://localhost:${fwd}**`,
-                "",
-                "_Your device must be logged into the same tailnet; TS-SSH is enabled._"
-              ].join("\n");
-            } else if (tun === "tor" && url) {
-              accessBlock = [
-                "**Access Method**",
-                "",
-                "[Tor Browser](https://www.torproject.org/) →",
-                `**${url}**`
-              ].join("\n");
-            } else if ((tun === "cloudflare" || tun === "localhostrun" || tun === "inlets") && url) {
-              accessBlock = [
-                "**Access Method**",
-                "",
-                "**Regular Browser:**",
-                url
-              ].join("\n");
-            } else {
-              accessBlock = [
-                "**Access Method**",
-                "",
-                "_Tunnel is initializing; refresh in a few seconds._"
-              ].join("\n");
+            if (val) {
+              if (kind === "ssh" && tsip) {
+                const fwd = 8443;
+                accessBlock = [
+                  "**Access Method**", "",
+                  "**Paste in terminal for SSH port-forward:**",
+                  "```bash",
+                  `ssh -N -L ${fwd}:127.0.0.1:${port} ${user}@${tsip}`,
+                  "```",
+                  `then open: **http://localhost:${fwd}**`, "",
+                  "_Your device must be logged into the same tailnet; TS-SSH is enabled._"
+                ].join("\n");
+              } else if (kind === "browser" && url) {
+                 accessBlock = `**Access Method**\n\n**${note}**\n\n> ${url}`;
+              }
             }
 
             const body = [
-              mark,
-              "### Tunnel Sandbox · Status",
-              "",
-              `**OS:** \`${os}\`  |  **Tunnel:** \`${tun}\`  |  **App Port:** \`${port}\``,
-              "",
-              accessBlock,
-              "",
-              `_Max runtime capped at ${cap} minutes even if you request longer._`,
-              "_Edit this issue to change options. Concurrency cancels the previous run._",
-              ""
+              mark, "### Tunnel Sandbox · Status", "",
+              `**OS:** \`${os}\`  |  **Tunnel:** \`${tun}\`  |  **App Port:** \`${port}\``, "",
+              accessBlock, "",
+              `_Max runtime is capped at ${cap} minutes._`,
+              "_Edit this issue to change options (cancels the previous run)._", ""
             ].join("\n");
 
             const { data: comments } = await github.rest.issues.listComments({
@@ -565,65 +424,53 @@ jobs:
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
             }
 
-      # ------------------ Keep session alive (honors cap) ------------------
       - name: Keep session alive
         run: |
-          # Respect user minutes, but never exceed MAX_CAP_MINUTES
           want_secs=$(( KEEP_MINUTES * 60 ))
           cap_secs=$(( MAX_CAP_MINUTES * 60 ))
           secs=$want_secs
           if (( secs > cap_secs )); then secs=$cap_secs; fi
-          echo "Keeping the session alive for $(( secs / 60 )) minute(s) (capped)."
-          for _ in $(seq 1 $secs); do sleep 1; done
-          echo "Time up. Shutting down."
+          echo "Keeping session alive for $(( secs / 60 )) minute(s)."
+          sleep $secs
+          echo "Time up."
 
-      # ------------------ Failure handling / tmate rescue ------------------
-      - name: Collect quick logs (on failure)
+      # ------------------ Failure Handling ------------------
+      - name: Collect logs (on failure)
         if: failure()
         run: |
-          echo '--- server.log (last 80) ---'
-          tail -n 80 server.log || true
-          echo '--- cloudflared.log (last 120) ---'
-          tail -n 120 cloudflared.log || true
-          echo '--- localhostrun.jsonl (last 120) ---'
-          tail -n 120 ~/localhostrun.jsonl || true
-          echo '--- tor/tor.log (last 120) ---'
-          tail -n 120 tor/tor.log || true
+          set +e
+          echo '--- server.log ---'; tail -n 80 server.log
+          echo '--- cloudflared.log ---'; tail -n 120 cloudflared.log
+          echo '--- localhostrun.jsonl ---'; tail -n 120 ~/localhostrun.jsonl
+          echo '--- inlets.log ---'; tail -n 120 inlets.log
+          echo '--- tor/tor.log ---'; tail -n 120 tor/tor.log
 
-      - name: 🔧 tmate rescue (detached, on failure)
-        id: tmate
+      - name: tmate rescue shell (on failure)
         if: failure()
-        timeout-minutes: ${{ env.DEBUG_WINDOW_MINUTES }}
         uses: mxschmitt/action-tmate@v3
+        timeout-minutes: ${{ env.DEBUG_WINDOW_MINUTES }}
         with:
           detached: true
           limit-access-to-actor: true
+        id: tmate
 
-      - name: Upsert status comment (tmate links)
+      - name: Upsert status comment (tmate)
         if: failure()
         uses: actions/github-script@v7
-        env:
-          STATUS_MARK: ${{ env.STATUS_MARK }}
         with:
           script: |
             const mark = process.env.STATUS_MARK;
-            const ssh = `${{ steps.tmate.outputs['ssh-command'] || '' }}`.trim();
-            const web = `${{ steps.tmate.outputs['web-url'] || '' }}`.trim();
-            const lines = [
-              mark,
-              "### Tunnel Sandbox · Status",
-              "",
-              "❗ The job failed — opening a debug shell (tmate).",
-              "",
-              ssh ? "**SSH:**```bash\n" + ssh + "\n```" : "",
-              web ? `**Web shell:** ${web}` : "",
-              "",
-              "_This stays open until you end the session or the timeout is reached._",
-              ""
-            ].filter(Boolean);
-            const body = lines.join("\n");
+            const ssh = `${{ steps.tmate.outputs.sshCommand }}`.trim();
+            const web = `${{ steps.tmate.outputs.webUrl }}`.trim();
+            const body = [
+              mark, "### Tunnel Sandbox · Status", "",
+              "❗ **Job failed** — opening a debug shell.", "",
+              "**SSH:**", "```bash\n" + ssh + "\n```",
+              `**Web shell:** ${web}`, "",
+              `_This stays open for ${process.env.DEBUG_WINDOW_MINUTES} minutes._`, ""
+            ].join("\n");
             const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number
             });
             const prev = comments.find(c => c.body && c.body.includes(mark));
             if (prev) {
@@ -631,11 +478,4 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
             }
-
-      - name: Wait for debugging window
-        if: failure()
-        run: |
-          mins="${DEBUG_WINDOW_MINUTES:-10}"
-          echo "Debug window: $mins minute(s)."
-          sleep "$((mins*60))"
 
