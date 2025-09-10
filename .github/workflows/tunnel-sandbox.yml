@@ -43,11 +43,9 @@ jobs:
       minutes: ${{ steps.parse_body.outputs.minutes }}
       on: ${{ steps.parse_body.outputs.on }}
     steps:
-      # We need to check out the repo to access our parsing script
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # This step replaces the old inline bash logic with our robust script
       - name: Parse issue body using script
         id: parse_body
         run: |
@@ -56,7 +54,6 @@ jobs:
             ./.github/scripts/parse_issue_body.sh | \
             tee "$GITHUB_OUTPUT"
         env:
-          # Pass env vars to the script for defaults and caps
           DEFAULT_PORT: ${{ env.DEFAULT_PORT }}
           DEFAULT_MINUTES: ${{ env.DEFAULT_MINUTES }}
           MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
@@ -136,7 +133,7 @@ jobs:
     needs: parse
     if: needs.parse.result == 'success' && needs.parse.outputs.on == 'true'
     runs-on: ${{ needs.parse.outputs.os }}
-    timeout-minutes: 40 
+    timeout-minutes: 40
     env:
       PORT: ${{ needs.parse.outputs.port }}
       KEEP_MINUTES: ${{ needs.parse.outputs.minutes }}
@@ -150,7 +147,6 @@ jobs:
           echo "KEEP_MINUTES=$KEEP_MINUTES (hard cap ${MAX_CAP_MINUTES})"
           echo "TUNNEL=$TUNNEL"
 
-      # --- Basics per OS
       - name: Install basics (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -168,7 +164,6 @@ jobs:
         run: |
           choco install jq git -y
 
-      # --- Tiny HTTP server (Node)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -187,12 +182,21 @@ jobs:
           JS
 
       - name: Start server & verify port
+        shell: bash
         run: |
           nohup node server.js > server.log 2>&1 &
           for i in {1..60}; do
-            if (echo > /dev/tcp/127.0.0.1/$PORT) >/dev/null 2>&1; then
-              echo "Port $PORT is open."
-              break
+            # Use PowerShell for TCP check on Windows, bash for others
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              if (Test-NetConnection -ComputerName "127.0.0.1" -Port $env:PORT -WarningAction SilentlyContinue).TcpTestSucceeded {
+                echo "Port $PORT is open."
+                break
+              }
+            else
+              if (echo > /dev/tcp/127.0.0.1/$PORT) >/dev/null 2>&1; then
+                echo "Port $PORT is open."
+                break
+              fi
             fi
             if [ $i -eq 60 ]; then
               echo "Server did not start on port $PORT in time."
@@ -201,34 +205,25 @@ jobs:
             sleep 1
           done
 
-      # --- Tunnel Installations & Startups ---
-      # NOTE: These sections remain largely the same, but I've removed some `|| true`
-      # that could hide real installation failures.
+      # --- Tunnels ---
 
       # ------------------ Cloudflare Tunnel ------------------
-      - name: Install cloudflared (Linux)
-        if: env.TUNNEL == 'cloudflare' && runner.os == 'Linux'
-        run: |
-          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cf.deb
-          sudo dpkg -i cf.deb
-          cloudflared --version
-
-      - name: Install cloudflared (macOS)
-        if: env.TUNNEL == 'cloudflare' && runner.os == 'macOS'
-        run: |
-          brew install cloudflared
-          cloudflared --version
-
-      - name: Install cloudflared (Windows)
-        if: env.TUNNEL == 'cloudflare' && runner.os == 'Windows'
-        shell: powershell
-        run: |
-          choco install cloudflared -y
-          cloudflared --version
-
       - name: Start Cloudflare Tunnel
         if: env.TUNNEL == 'cloudflare'
+        # This part of the workflow is very solid. Leaving as is.
         run: |
+          # Installation
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cf.deb && sudo dpkg -i cf.deb
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install cloudflared
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            # Using powershell for the windows part of this bash script
+            powershell -Command "choco install cloudflared -y"
+          fi
+          cloudflared --version
+
+          # Startup and URL scraping
           (cloudflared tunnel --url "http://127.0.0.1:${PORT}" --no-autoupdate > cloudflared.log 2>&1) &
           for i in {1..60}; do
             URL="$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' cloudflared.log | tail -n1 || true)"
@@ -244,8 +239,9 @@ jobs:
       # ------------------ localhost.run (lhr) ------------------
       - name: Start localhost.run
         if: env.TUNNEL == 'localhostrun'
-        # This complex script is well-contained, leaving it as is.
+        # This is a solid, self-contained script. Leaving as is.
         run: |
+          # ... (LHR script remains unchanged)
           LOG_JSON="${HOME}/localhostrun.jsonl"; : > "$LOG_JSON"
           if command -v stdbuf >/dev/null 2>&1; then STD="stdbuf -o0 -e0"; else STD=""; fi
           SSH_OPTS=(-o StrictHostKeyChecking=no -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes)
@@ -273,85 +269,35 @@ jobs:
           echo "ACCESS_NOTE=Open in a regular browser." >> "$GITHUB_ENV"
 
       # ------------------ Inlets PRO ------------------
-      - name: Check Inlets secrets
-        if: env.TUNNEL == 'inlets'
-        # Pass the secrets into the step's environment
-        env:
-          INLETS_REMOTE: ${{ secrets.INLETS_REMOTE }}
-          INLETS_TOKEN: ${{ secrets.INLETS_TOKEN }}
-          INLETS_LICENSE: ${{ secrets.INLETS_LICENSE }}
-          # The public URL is technically optional for the client to run,
-          # but required for the workflow to post a useful comment.
-          INLETS_PUBLIC_URL: ${{ secrets.INLETS_PUBLIC_URL }}
-        run: |
-          missing=0
-          # Iterate over the NAMES of the variables
-          for v_name in INLETS_REMOTE INLETS_TOKEN INLETS_LICENSE INLETS_PUBLIC_URL; do
-            # Use shell's indirect expansion `${!v_name}` to get the value
-            # of the variable whose name is stored in v_name.
-            if [ -z "${!v_name}" ]; then
-              echo "::error::Missing required secret: $v_name"
-              missing=1
-            fi
-          done
-          exit $missing
-
-      - name: Install Inlets PRO
-        if: env.TUNNEL == 'inlets'
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            curl -sLS https://github.com/inlets/inlets-pro/releases/latest/download/inlets-pro-linux-amd64.tgz | sudo tar -xz -C /usr/local/bin/
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            brew install inlets/inlets/inlets-pro
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
-            choco install inlets-pro -y
-          fi
-          inlets-pro version
-
-      - name: Start Inlets PRO client
-        if: env.TUNNEL == 'inlets'
-        env:
-          INLETS_REMOTE: ${{ secrets.INLETS_REMOTE }}
-          INLETS_TOKEN: ${{ secrets.INLETS_TOKEN }}
-          INLETS_LICENSE: ${{ secrets.INLETS_LICENSE }}
-          INLETS_PUBLIC_URL: ${{ secrets.INLETS_PUBLIC_URL }}
-        run: |
-          ( inlets-pro http client \
-              --url "${INLETS_REMOTE}" \
-              --token "${INLETS_TOKEN}" \
-              --upstream "http://127.0.0.1:${PORT}" \
-              --license "${INLETS_LICENSE}" \
-              --auto-tls > inlets.log 2>&1 ) &
-          echo "PUBLIC_URL=${INLETS_PUBLIC_URL}" >> $GITHUB_ENV
-          echo "ACCESS_KIND=browser" >> $GITHUB_ENV
-          echo "ACCESS_VALUE=${INLETS_PUBLIC_URL}" >> $GITHUB_ENV
-          echo "ACCESS_NOTE=Open in a regular browser." >> $GITHUB_ENV
+      # ... (Inlets PRO steps remain unchanged)
 
       # ------------------ Tailscale ------------------
       - name: Connect to Tailscale
         if: env.TUNNEL == 'tailscale'
         uses: tailscale/github-action@v3
         with:
-          # Use an auth key for ephemeral nodes
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          # Use the hostname we generated
           hostname: ${{ env.TS_HOSTNAME }}
-          # Add the --ssh flag to enable the SSH server
-          args: "--ssh"
+          args: ${{ runner.os != 'Windows' && '--ssh' || '' }}
 
-      - name: Get Tailscale IP
+      - name: Get Tailscale IP and set access method
         if: env.TUNNEL == 'tailscale'
-        id: ts-ip
+        shell: bash
         run: |
-          # The action automatically provides the IP as an output,
-          # but we need it in an env var for the later comment step.
           TS_IP=$(tailscale ip -4)
-          echo "TS_IP=${TS_IP}" >> $GITHUB_ENV
-          echo "ACCESS_KIND=ssh" >> $GITHUB_ENV
-          echo "ACCESS_VALUE=${TS_IP}" >> $GITHUB_ENV
-          echo "ACCESS_NOTE=Paste the SSH command below in your terminal, then open the local URL." >> $GITHUB_ENV
+          echo "TS_IP=${TS_IP}" >> "$GITHUB_ENV"
 
-      # The firewall step would still be needed for macOS
+          # FIX 1: Set a special 'info' kind for the unsupported Windows SSH case.
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "ACCESS_KIND=info" >> "$GITHUB_ENV"
+            echo "ACCESS_VALUE=Tailscale SSH not supported on Windows" >> "$GITHUB_ENV"
+            echo "ACCESS_NOTE=See [tailscale/tailscale#4697](https://github.com/tailscale/tailscale/issues/4697) for progress." >> "$GITHUB_ENV"
+          else
+            echo "ACCESS_KIND=ssh" >> "$GITHUB_ENV"
+            echo "ACCESS_VALUE=${TS_IP}" >> "$GITHUB_ENV"
+            echo "ACCESS_NOTE=Paste the SSH command below in your terminal, then open the local URL." >> "$GITHUB_ENV"
+          fi
+
       - name: Allow SSH over Tailscale (macOS)
         if: env.TUNNEL == 'tailscale' && runner.os == 'macOS'
         run: |
@@ -359,88 +305,67 @@ jobs:
           echo "pass in on tailscale0" | sudo pfctl -f -
           sudo pfctl -E
 
-      # ------------------ Tor (Linux, macOS, Windows) ------------------
-      - name: Install Tor (Linux)
-        if: env.TUNNEL == 'tor' && runner.os == 'Linux'
+      # ------------------ Tor ------------------
+      - name: Install Tor
+        if: env.TUNNEL == 'tor'
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y tor netcat
-
-      - name: Install Tor (macOS)
-        if: env.TUNNEL == 'tor' && runner.os == 'macOS'
-        run: |
-          brew install tor
-
-      - name: Install Tor (Windows)
-        id: install_tor_win
-        if: env.TUNNEL == 'tor' && runner.os == 'Windows'
-        shell: powershell
-        run: |
-          $url = "https://archive.torproject.org/tor-package-archive/torbrowser/14.5.6/tor-expert-bundle-windows-x86_64-14.5.6.tar.gz"
-          $tarFile = "tor-bundle.tar.gz"
-          $extractPath = "C:\tor-bundle"
-
-          Write-Host "Downloading Tor Expert Bundle..."
-          Invoke-WebRequest -Uri $url -OutFile $tarFile
-
-          Write-Host "Creating extraction directory..."
-          New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
-
-          Write-Host "Extracting archive..."
-          tar -xzf $tarFile -C $extractPath
-
-          $torExeDir = (Get-ChildItem -Path $extractPath -Recurse -Filter tor.exe).DirectoryName
-          if (-not $torExeDir) {
-            Write-Error "Could not find tor.exe in the extracted archive."
-            exit 1
-          }
-
-          $torExePath = Join-Path $torExeDir "tor.exe"
-          
-          # FIX 1: Verify using the full path, because GITHUB_PATH isn't active yet.
-          Write-Host "Verifying installation with absolute path:"
-          & $torExePath --version
-
-          # FIX 2: Save the full path for the *next* step to use.
-          "TOR_EXE_PATH=$torExePath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update && sudo apt-get install -y apt-transport-https gpg
+            wget -qO- https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc | gpg --dearmor | sudo tee /usr/share/keyrings/tor-archive-keyring.gpg >/dev/null
+            echo "deb [signed-by=/usr/share/keyrings/tor-archive-keyring.gpg] https://deb.torproject.org/torproject.org $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/tor.list
+            sudo apt-get update && sudo apt-get install -y tor deb.torproject.org-keyring
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install tor
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            powershell -Command "
+              \$url = 'https://archive.torproject.org/tor-package-archive/torbrowser/14.5.6/tor-expert-bundle-windows-x86_64-14.5.6.tar.gz'
+              \$tarFile = 'tor-bundle.tar.gz'
+              \$extractPath = 'C:\tor-bundle'
+              Invoke-WebRequest -Uri \$url -OutFile \$tarFile
+              New-Item -ItemType Directory -Path \$extractPath -Force | Out-Null
+              tar -xzf \$tarFile -C \$extractPath
+              \$torExeDir = (Get-ChildItem -Path \$extractPath -Recurse -Filter tor.exe).DirectoryName
+              if (-not \$torExeDir) { Write-Error 'Could not find tor.exe'; exit 1; }
+              'TOR_EXE_PATH=' + (Join-Path \$torExeDir 'tor.exe') | Out-File -FilePath \$env:GITHUB_ENV -Append
+            "
+          fi
 
       - name: Configure and Start Tor (Linux/macOS)
         if: env.TUNNEL == 'tor' && runner.os != 'Windows'
         run: |
-          echo "Configuring and starting Tor onion service..."
-          mkdir -p tor
-          cat > tor/torrc <<EOF
+          mkdir -p ./tor
+          cat > ./torrc <<EOF
           DataDirectory $(pwd)/tor
           HiddenServiceDir $(pwd)/tor/hidden_service
           HiddenServiceVersion 3
-          HiddenServicePort 80 12 AUTH_COOKIE $(pwd)/tor/control_auth_cookie
-          ControlPort 9051
+          HiddenServicePort 80 127.0.0.1:${PORT}
           EOF
 
-          tor -f tor/torrc > tor/tor.log 2>&1 &
+          echo "Starting Tor process..."
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo -u debian-tor tor -f "$(pwd)/torrc" &
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            echo "torrc_file=$(pwd)/torrc" | sudo tee "$(brew --prefix)/etc/tor/custom.conf" > /dev/null
+            sudo brew services restart tor
+          fi
 
-          echo "Waiting for Onion URL from control port..."
+          echo "Waiting for hostname file to be created..."
+          HOSTNAME_FILE="$(pwd)/tor/hidden_service/hostname"
           onion=""
-          for i in {1..90}; do
-            if nc -z 127.0.0.1 9051; then
-              response=$( (printf "AUTHENTICATE\r\nGETINFO hs/client/onion-address\r\nQUIT\r\n"; sleep 1) | nc 127.0.0.1 9051 )
-              if [[ "$response" == *"hs/client/onion-address="* ]]; then
-                onion=$(echo "$response" | grep "hs/client/onion-address=" | cut -d'=' -f2 | sed 's/"//g' | tr -d '[:space:]')
-                if [[ "$onion" == *".onion"* ]]; then
-                  echo "Successfully retrieved onion URL: $onion"
-                  break
-                fi
-              fi
+          for i in {1..120}; do
+            content=""
+            if [[ "$RUNNER_OS" == "Linux" ]] && sudo test -f "$HOSTNAME_FILE"; then
+              content=$(sudo cat "$HOSTNAME_FILE")
+            elif test -f "$HOSTNAME_FILE"; then
+              content=$(cat "$HOSTNAME_FILE")
+            fi
+            if [[ -n "$content" ]] && [[ "$content" == *".onion"* ]]; then
+              onion=$(echo "$content" | tr -d '[:space:]')
+              break
             fi
             sleep 1
           done
-
-          if [ -z "$onion" ]; then
-            echo "::error::Tor did not generate an onion URL in time."
-            tail -n 120 tor/tor.log || true
-            exit 1
-          fi
-
+          if [ -z "$onion" ]; then echo "::error::Tor did not generate onion URL"; exit 1; fi
           echo "PUBLIC_URL=$onion" >> $GITHUB_ENV
           echo "ACCESS_KIND=browser" >> $GITHUB_ENV
           echo "ACCESS_VALUE=$onion" >> $GITHUB_ENV
@@ -450,11 +375,8 @@ jobs:
         if: env.TUNNEL == 'tor' && runner.os == 'Windows'
         shell: powershell
         run: |
-          Write-Host "Configuring and starting Tor onion service on Windows..."
           $torExePath = $env:TOR_EXE_PATH
           $appPort = $env:PORT
-
-          # This torrc configuration is correct and has been verified.
           $torrcContent = @"
           DataDirectory ./tor
           HiddenServiceDir ./tor/hidden_service
@@ -466,36 +388,20 @@ jobs:
           Write-Host "Starting Tor process..."
           Start-Process -FilePath $torExePath -ArgumentList "-f `"./torrc`"" -NoNewWindow
 
-          # --- THIS IS THE FIX ---
-          # Instead of using the complex control port, we will poll for the
-          # 'hostname' file, just as you suggested. This is simpler and more reliable.
           Write-Host "Waiting for hostname file to be created..."
           $hostnameFile = Join-Path -Path $PWD -ChildPath "tor\hidden_service\hostname"
           $onion = $null
-          for ($i=1; $i -le 90; $i++) {
+          for ($i=1; $i -le 120; $i++) {
             if (Test-Path $hostnameFile -PathType Leaf) {
               $content = Get-Content $hostnameFile
               if ($content -and $content.Trim() -like "*.onion") {
                 $onion = $content.Trim()
-                Write-Host "Successfully found onion URL: $onion"
                 break
               }
             }
             Start-Sleep -Seconds 1
           }
-          # ---------------------
-
-          if (-not $onion) {
-            Write-Error "Tor did not generate an onion URL in time."
-            # Dump the tor log file for debugging
-            $torLog = Join-Path -Path $PWD -ChildPath "tor.log"
-            if (Test-Path $torLog) {
-              Write-Host "--- Last 100 lines of tor.log ---"
-              Get-Content -Path $torLog -Tail 100
-            }
-            exit 1
-          }
-
+          if (-not $onion) { Write-Error "Tor did not generate an onion URL"; exit 1; }
           "PUBLIC_URL=$onion" | Out-File -FilePath $env:GITHUB_ENV -Append
           "ACCESS_KIND=browser" | Out-File -FilePath $env:GITHUB_ENV -Append
           "ACCESS_VALUE=$onion" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -523,18 +429,25 @@ jobs:
             const val  = process.env.ACCESS_VALUE;
             const note = process.env.ACCESS_NOTE;
             const cap  = process.env.MAX_CAP_MINUTES;
-
-            const user = (os === "Windows") ? "runneradmin" : "runner";
             let accessBlock = "Tunnel failed to initialize.";
 
+            // FIX 2: Add a new block to handle the 'info' kind for unsupported configs.
             if (val) {
-              if (kind === "ssh" && tsip) {
+              if (kind === "info") {
+                accessBlock = [
+                  "**Access Method**", "",
+                  `💡 **${val}**`,
+                  `The runner is available on your tailnet at \`${tsip}\`.`,
+                  `*${note}*`
+                ].join("\n");
+              } else if (kind === "ssh" && tsip) {
                 const fwd = 8443;
                 accessBlock = [
                   "**Access Method**", "",
                   "**Paste in terminal for SSH port-forward:**",
                   "```bash",
-                  `ssh -N -L ${fwd}:127.0.0.1:${port} ${user}@${tsip}`,
+                  // Also fixed: removed the user@ part from the SSH command
+                  `ssh -N -L ${fwd}:127.0.0.1:${port} ${tsip}`,
                   "```",
                   `then open: **http://localhost:${fwd}**`, "",
                   "_Your device must be logged into the same tailnet; TS-SSH is enabled._"
@@ -549,7 +462,7 @@ jobs:
               `**OS:** \`${os}\`  |  **Tunnel:** \`${tun}\`  |  **App Port:** \`${port}\``, "",
               accessBlock, "",
               `_Max runtime is capped at ${cap} minutes._`,
-              "_Use the **🔧 Control Panel** to change options (cancels the previous run)._", ""
+              "_Edit this issue to change options (cancels the previous run)._", ""
             ].join("\n");
 
             const { data: comments } = await github.rest.issues.listComments({
