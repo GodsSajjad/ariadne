@@ -187,7 +187,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          Start-Process -FilePath "node" -ArgumentList "server.js" -RedirectStandardOutput "server.log" -RedirectStandardError "server.log" -NoNewWindow
+          Start-Process -FilePath "node" -ArgumentList "server.js" -RedirectStandardOutput "server-out.log" -RedirectStandardError "server-err.log" -NoNewWindow
           for ($i = 1; $i -le 60; $i++) {
             if ((Test-NetConnection -ComputerName "127.0.0.1" -Port $env:PORT -WarningAction SilentlyContinue).TcpTestSucceeded) {
               Write-Output "Port $env:PORT is open."
@@ -204,7 +204,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          nohup node server.js > server.log 2>&1 &
+          nohup node server.js > server-both.log 2>&1 &
           for i in {1..60}; do
             if (echo > /dev/tcp/127.0.0.1/$PORT) >/dev/null 2>&1; then
               echo "Port $PORT is open."
@@ -770,16 +770,18 @@ jobs:
         if: failure()
         run: |
           set +e
-          echo '--- server.log ---'; tail -n 80 server.log
-          echo '--- cloudflared.log ---'; tail -n 120 cloudflared.log
-          echo '--- localhostrun.jsonl ---'; tail -n 120 ~/localhostrun.jsonl
-          echo '--- inlets.log ---'; tail -n 120 inlets.log
-          echo '--- tor/tor.log ---'; tail -n 120 tor/tor.log
+          echo '--- server-out.log ---'; tail -n 80 server-out.log || true
+          echo '--- server-err.log ---'; tail -n 80 server-err.log || true
+          echo '--- server-both.log ---'; tail -n 80 server-both.log || true
+          echo '--- cloudflared.log ---'; tail -n 120 cloudflared.log || true
+          echo '--- localhostrun.jsonl ---'; tail -n 120 ~/localhostrun.jsonl || true
+          echo '--- inlets.log ---'; tail -n 120 inlets.log || true
+          echo '--- tor/tor.log ---'; tail -n 120 tor/tor.log || true
 
       - name: tmate rescue shell (on failure)
         if: failure()
         uses: mxschmitt/action-tmate@v3
-        timeout-minutes: ${{ env.DEBUG_WINDOW_MINUTES }}
+        timeout-minutes: 10 # debug window minutes
         with:
           detached: true
           limit-access-to-actor: true
