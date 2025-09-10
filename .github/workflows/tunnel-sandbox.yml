@@ -360,7 +360,7 @@ jobs:
             # 2. Ensure debian-tor owns the directories and config.
             sudo mkdir -p "/var/lib/tor/hidden_service_${PORT}"
             sudo chown -R debian-tor:debian-tor "/var/lib/tor/hidden_service_${PORT}"
-            sudo chmod 770 "/var/lib/tor/hidden_service_${PORT}"
+            sudo chmod 700 "/var/lib/tor/hidden_service_${PORT}"
             # 3. Run tor pointing to the new, accessible config file.
             sudo -u debian-tor tor &
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
