@@ -637,7 +637,7 @@ jobs:
           $cfg  = $env:TORRC_PATH
 
           # Create & launch as a scheduled task to escape the Actions job object
-          schtasks /Delete /TN $taskName /F 2>$null | Out-Null
+          # schtasks /Delete /TN $taskName /F 2>$null | Out-Null
           schtasks /Create /TN $taskName /SC ONCE /ST 00:00 /TR "`"$exe`" -f `"$cfg`"" /RL HIGHEST /F | Out-Null
           schtasks /Run /TN $taskName | Out-Null
 
