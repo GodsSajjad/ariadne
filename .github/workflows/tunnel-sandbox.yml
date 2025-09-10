@@ -617,7 +617,6 @@ jobs:
           # Configure torrc (overwrite for simplicity in fresh runner)
           Write-Host "Configuring torrc at $torrcPath..."
           $torrcContent = @"
-          DataDirectory $torDir
           ControlPort $controlPort
           CookieAuthentication 1
           HiddenServiceDir $hsDir
