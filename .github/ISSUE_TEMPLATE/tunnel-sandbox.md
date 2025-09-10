@@ -29,10 +29,6 @@ Select a runner, a tunnel, then check "ON" to start!
 - [ ] Tailscale<sup>†</sup>
 - [ ] Tor<sup>‡</sup>
 
-> † *needs [Tailscale](https://tailscale.com/kb/1347/installation) at your access point*
-
-> ‡ *needs [Tor Browser](https://www.torproject.org/download/) at your access point*
-
 ### 3. Power
 
 - [ ] ON (check this box to start the sandbox)
@@ -49,9 +45,6 @@ port: 8080
 # Minutes to keep the runner alive (workflow hard-cap is 80)
 minutes: 40
 ```
-
-
----
 
 <details>
   <summary>
@@ -92,5 +85,7 @@ minutes: 40
 
 </details>
 
----
+> † *needs [Tailscale](https://tailscale.com/kb/1347/installation) at your access point*
+
+> ‡ *needs [Tor Browser](https://www.torproject.org/download/) at your access point*
 
