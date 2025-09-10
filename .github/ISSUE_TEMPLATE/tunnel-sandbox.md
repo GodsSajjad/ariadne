@@ -50,6 +50,13 @@ minutes: 40
 
 ---
 
+<details>
+  <summary>
+
+## Troubleshooting and More Information
+
+  </summary>
+
 ### Notes / Secrets (only if applicable)
 
 **Inlets PRO**
@@ -64,7 +71,7 @@ minutes: 40
 
 > Click options to change them — the action will re-run with the options you select.
 
-## Tunneling Access Overview
+### Tunneling Access Overview
 
 | Option | Public link? | Setup (Runner → User) | Typical perf | Reliability/NAT | Privacy / Exposure | Best for |
 |---|---|---|---|---|---|---|
@@ -79,6 +86,8 @@ minutes: 40
 > • **Inlets PRO** needs secrets for your controller (see below).
 > • **Tor** requires Tor Browser to visit `.onion` URLs.
 > • **Max runtime is capped at 80 minutes**, even if you request longer.
+
+</details>
 
 ---
 
