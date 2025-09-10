@@ -195,7 +195,7 @@ jobs:
         run: |
           Start-Process -FilePath "node.exe" -ArgumentList "server.js" 
           for ($i = 1; $i -le 60; $i++) {
-            if (curl.exe localhost:$PORT) {
+            if (curl.exe localhost:$env:PORT) {
               Write-Output "Port $env:PORT is open."
               break
             }
