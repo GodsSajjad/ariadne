@@ -1,8 +1,9 @@
-name: Tunnel Sandbox
+name: Ariadne 
 description: Spin up a Hello World server and expose it via a chosen tunnel.
-title: "[Sandbox]"
+title: "[Ariadne]"
 labels: ["tunnel-sandbox"]
-assignees: ''
+assignees:
+  - octocat
 
 body:
   - type: markdown
