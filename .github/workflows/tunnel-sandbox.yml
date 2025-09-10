@@ -618,7 +618,9 @@ jobs:
           New-Item -ItemType Directory -Path $hsDir -Force | Out-Null
           
           # Configure torrc (overwrite for simplicity in fresh runner)
-          Write-Host "Configuring torrc at $torrcPath..."
+         
+          # Logic
+          Write-Host "Configuring torrc at $torrcPath like a champ..."
           $torrcContent = @"
           ControlPort $controlPort
           CookieAuthentication 1
@@ -626,8 +628,11 @@ jobs:
           HiddenServiceVersion 3
           HiddenServicePort 80 127.0.0.1:$appPort
           "@
-          Set-Content -Path $torrcPath -Value $torrcContent -Encoding UTF8
-          
+
+          # Write file as UTF-8 without BOM
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::WriteAllText($torrcPath, $torrcContent, $utf8NoBom)
+ 
           # Check if Tor is already running (by control port)
           $torRunning = $false
           try {
