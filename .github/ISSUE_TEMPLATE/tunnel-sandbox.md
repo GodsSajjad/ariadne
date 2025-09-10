@@ -24,11 +24,14 @@ Select a runner, a tunnel, then check "ON" to start!
 
 ### 2. Tunnel (pick ONE)
 
-- [x] Cloudflare Tunnel (ephemeral trycloudflare.com)
-- [ ] localhost.run (free SSH reverse tunnel)
-- [ ] Inlets PRO (requires secrets)
-- [ ] Tailscale (VPN overlay; SSH port-forward from your device)
-- [ ] Tor (hidden service onion URL)
+- [x] Cloudflare Tunnel
+- [ ] localhost.run 
+- [ ] Tailscale<sup>†</sup>
+- [ ] Tor<sup>‡</sup>
+
+> † *needs [Tailscale](https://tailscale.com/kb/1347/installation) at your access point*
+
+> ‡ *needs [Tor Browser](https://www.torproject.org/download/) at your access point*
 
 ### 3. Power
 
