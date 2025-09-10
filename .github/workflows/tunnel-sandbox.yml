@@ -1,4 +1,5 @@
 # version
+
 name: Tunnel Sandbox (Cloudflare | lhr | Inlets | Tailscale | Tor)
 
 on:
@@ -341,45 +342,52 @@ jobs:
       - name: Configure and Start Tor (Linux/macOS)
         if: env.TUNNEL == 'tor' && runner.os != 'Windows'
         run: |
-          mkdir -p ./tor
-          cat > ./torrc <<EOF
-          DataDirectory /var/lib/tor/hidden_service_dir
-          HiddenServiceDir /var/lib/tor/hidden_service_dir/hs
-          HiddenServiceVersion 3
+          echo "Starting Tor process..."
+          pfx=""
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            cat > ./torrc <<EOF
+          ControlPort 9051
+          CookieAuthentication 1
+          CookieAuthFileGroupReadable 1
+          CookieAuthFile ${pfx}/var/lib/tor/control_auth_cookie
+          HiddenServiceDir ${pfx}/var/lib/tor/hidden_service_${PORT}
           HiddenServicePort 80 127.0.0.1:${PORT}
           EOF
 
-          echo "Starting Tor process..."
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            cat ./torrc | sudo tee "${pfx}/etc/tor/torrc" > /dev/null
             # --- THIS IS THE FIX ---
             # 1. Copy the config file to a location debian-tor can read.
-            sudo cp ./torrc /etc/tor/torrc.ariadne
             # 2. Ensure debian-tor owns the directories and config.
-            sudo chown -R debian-tor:debian-tor /var/lib/tor/hidden_service_dir
-            sudo chown debian-tor:debian-tor /etc/tor/torrc.ariadne
+            sudo mkdir -p "/var/lib/tor/hidden_service_${PORT}"
+            sudo chown -R debian-tor:debian-tor "/var/lib/tor/hidden_service_${PORT}"
             # 3. Run tor pointing to the new, accessible config file.
-            sudo -u debian-tor tor -f /etc/tor/torrc.ariadne &
-
+            sudo -u debian-tor tor &
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             # The macOS logic is already sound, as brew handles the user context.
-            echo "torrc_file=$(pwd)/torrc" | sudo tee "$(brew --prefix)/etc/tor/custom.conf" > /dev/null
+            pfx="$(brew --prefix)"
+            cat > ./torrc <<EOF
+          ControlPort 9051
+          CookieAuthentication 1
+          CookieAuthFileGroupReadable 1
+          CookieAuthFile ${pfx}/var/lib/tor/control_auth_cookie
+          HiddenServiceDir ${pfx}/var/lib/tor/hidden_service_${PORT}
+          HiddenServicePort 80 127.0.0.1:${PORT}
+          EOF
+
+            cat ./torrc | sudo tee "${pfx}/etc/tor/torrc" > /dev/null
             sudo brew services restart tor
           fi
 
           echo "Waiting for hostname file to be created..."
           # The HOSTNAME_FILE path is now absolute for Linux.
-          HOSTNAME_FILE="/var/lib/tor/hidden_service_dir/hs/hostname"
+          HOSTNAME_FILE="${pfx}/var/lib/tor/hidden_service_${PORT}/hostname"
           onion=""
           for i in {1..120}; do
             content=""
             # Use sudo on Linux because debian-tor owns the file
-            if [[ "$RUNNER_OS" == "Linux" ]] && sudo test -f "$HOSTNAME_FILE"; then
+            if sudo test -f "$HOSTNAME_FILE"; then
               content=$(sudo cat "$HOSTNAME_FILE")
-            # The macOS check can remain as-is if we adjust its DataDirectory
-            elif [[ "$RUNNER_OS" == "macOS" ]] && test -f "$(pwd)/tor/hidden_service/hostname"; then
-               content=$(cat "$(pwd)/tor/hidden_service/hostname")
             fi
-
             if [[ -n "$content" ]] && [[ "$content" == *".onion"* ]]; then
               onion=$(echo "$content" | tr -d '[:space:]')
               break
