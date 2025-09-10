@@ -594,118 +594,85 @@ jobs:
           echo "ACCESS_VALUE=$onion" >> $GITHUB_ENV
           echo "ACCESS_NOTE=Requires Tor Browser." >> $GITHUB_ENV
 
-      - name: Configure and Start Tor (Windows)
+      # ------------------ Tor (Windows via Scheduled Task) ------------------
+      - name: Prepare torrc (Windows)
         if: env.TUNNEL == 'tor' && runner.os == 'Windows'
         shell: powershell
         run: |
-          # Validate tor.exe path
-          if (-not $env:TOR_EXE_PATH -or -not (Test-Path $env:TOR_EXE_PATH)) {
-            Write-Error "TOR_EXE_PATH is not set or tor.exe not found."
+          $torExe = $env:TOR_EXE_PATH
+          if (-not $torExe -or -not (Test-Path $torExe)) {
+            Write-Error "TOR_EXE_PATH invalid or not set: '$torExe'"
             exit 1
           }
-          $torExePath = $env:TOR_EXE_PATH
-          $appPort = $env:PORT
-          $workDir = $PWD.Path
-          $torDir = Join-Path $workDir 'tor'
-          $hsDir = Join-Path $torDir 'hidden_service'
-          $torrcPath = Join-Path $workDir 'torrc'
-          $hostnameFile = Join-Path $hsDir 'hostname'
-          $controlPort = 9051
-          $cookieAuthFile = Join-Path $torDir 'control_auth_cookie'
-          
-          # Ensure directories
-          Write-Host "Ensuring directories..."
+
+          $work   = $PWD.Path
+          $torDir = Join-Path $work 'tor'
+          $hsDir  = Join-Path $torDir 'hidden_service'
           New-Item -ItemType Directory -Path $hsDir -Force | Out-Null
-          
-          # Configure torrc (overwrite for simplicity in fresh runner)
-         
-          # Logic
-          Write-Host "Configuring torrc at $torrcPath like a champ..."
-          $torrcContent = @"
-          ControlPort $controlPort
+
+          $torrc  = Join-Path $work 'torrc'
+
+          # Minimal, quiet torrc (no GeoIP lines; uses defaults)
+          $content = @"
+          DataDirectory $torDir
+          ControlPort 9051
           CookieAuthentication 1
           HiddenServiceDir $hsDir
           HiddenServiceVersion 3
-          HiddenServicePort 80 127.0.0.1:$appPort
+          HiddenServicePort 80 127.0.0.1:$env:PORT
           "@
 
-          # Write file as UTF-8 without BOM
-          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-          [System.IO.File]::WriteAllText($torrcPath, $torrcContent, $utf8NoBom)
- 
-          # Check if Tor is already running (by control port)
-          $torRunning = $false
-          try {
-            $tcpClient = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $controlPort)
-            $tcpClient.Close()
-            $torRunning = $true
-            Write-Host "Tor control port $controlPort is open."
-          } catch {
-            Write-Host "No Tor control port open."
-          }
-          
-          # Robust start/reload (Windows has no service; check running and restart if needed)
-          Write-Host "Starting or reloading Tor..."
-          if ($torRunning) {
-            # Attempt reload via control (simplified; no full auth send, but kill/restart as fallback)
-            Write-Host "Tor running; attempting hard restart..."
-            Stop-Process -Name "tor" -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 2
-          } else {
-            Write-Host "Tor not running; starting new."
-          }
-          
-          # Start Tor
-          Start-Process -FilePath "$torExePath" `
-                        -ArgumentList @('-f', "$torrcPath") `
-                        -RedirectStandardOutput "tor.log" -RedirectStandardError "tor.err"
-          
+          [IO.File]::WriteAllText($torrc, $content, [Text.UTF8Encoding]::new($false))
+
+          "TOR_DIR=$torDir"   | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "HS_DIR=$hsDir"     | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TORRC_PATH=$torrc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Start Tor as a scheduled task (Windows)
+        if: env.TUNNEL == 'tor' && runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $taskName = 'TorEphemeral'
+          $exe  = $env:TOR_EXE_PATH
+          $cfg  = $env:TORRC_PATH
+
+          # Create & launch as a scheduled task to escape the Actions job object
+          schtasks /Delete /TN $taskName /F 2>$null | Out-Null
+          schtasks /Create /TN $taskName /SC ONCE /ST 00:00 /TR "`"$exe`" -f `"$cfg`"" /RL HIGHEST /F | Out-Null
+          schtasks /Run /TN $taskName | Out-Null
+
           # Wait for control port
-          $deadline = (Get-Date).AddSeconds(15)
+          $ctrl = 9051
+          $deadline = (Get-Date).AddSeconds(20)
           $portOpen = $false
           while ((Get-Date) -lt $deadline) {
-            try {
-              $tcpClient = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $controlPort)
-              $tcpClient.Close()
-              $portOpen = $true
-              Write-Host "Control port $controlPort is open."
-              break
-            } catch {
-              Start-Sleep -Seconds 1
-            }
+            try { (New-Object Net.Sockets.TcpClient('127.0.0.1', $ctrl)).Dispose(); $portOpen = $true; break } catch { Start-Sleep 1 }
           }
           if (-not $portOpen) {
-            Write-Error "Timeout waiting for control port $controlPort"
-            Get-Content "tor.log" | %{ "tor.log: $_" }
-            Get-Content "tor.err" | %{ "tor.err: $_" }
+            Write-Error "Timeout waiting for Tor control port $ctrl"
             exit 1
           }
-          
-          # Wait for hostname
-          Write-Host "Waiting for hostname file to be created..."
-          $onion = $null
+
+          # Wait for onion hostname
+          $hostnameFile = Join-Path $env:HS_DIR 'hostname'
           $deadline = (Get-Date).AddSeconds(120)
+          $onion = $null
           while ((Get-Date) -lt $deadline) {
             if (Test-Path $hostnameFile -PathType Leaf) {
-              $content = Get-Content $hostnameFile -ErrorAction SilentlyContinue
-              if ($content -and ($content.Trim() -like '*.onion')) {
-                $onion = $content.Trim()
-                break
-              }
+              $t = (Get-Content $hostnameFile -ErrorAction SilentlyContinue).Trim()
+              if ($t -like '*.onion') { $onion = $t; break }
             }
-            Start-Sleep -Seconds 1
+            Start-Sleep 1
           }
           if (-not $onion) {
             Write-Error "Tor did not generate an onion URL"
-            Get-ChildItem -Recurse $torDir | Format-List
-            Get-Content "tor.log" | %{ "tor.log: $_" }
-            Get-Content "tor.err" | %{ "tor.err: $_" }
             exit 1
           }
-          "PUBLIC_URL=$onion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "ACCESS_KIND=browser" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "ACCESS_VALUE=$onion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "ACCESS_NOTE=Requires Tor Browser." | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          "PUBLIC_URL=$onion"                   | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ACCESS_KIND=browser"                 | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ACCESS_VALUE=$onion"                 | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ACCESS_NOTE=Requires Tor Browser."   | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       # ------------------ Final Status & Keep-Alive ------------------
       - name: Upsert status comment (final access)
@@ -775,7 +742,7 @@ jobs:
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
             }
 
-      - name: tmate rescue shell (on failure)
+      - name: tmate rescue shell (for debug)
         uses: mxschmitt/action-tmate@v3
         timeout-minutes: 10 # debug window minutes
         with:
@@ -814,6 +781,13 @@ jobs:
           detached: true
           limit-access-to-actor: true
         id: tmate
+
+      - name: Cleanup Tor scheduled task (always)
+        if: env.TUNNEL == 'tor' && runner.os == 'Windows'
+        shell: powershell
+        run: |
+          schtasks /End /TN TorEphemeral 2>$null | Out-Null
+          schtasks /Delete /TN TorEphemeral /F 2>$null | Out-Null
 
       - name: Upsert status comment (tmate)
         if: failure()
