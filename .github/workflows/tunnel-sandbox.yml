@@ -346,7 +346,7 @@ jobs:
           # Debug flag (set to true for verbose control interactions; off by default)
           set -x
           TORBB_DEBUG="${TORBB_DEBUG:-false}"
-          log_dbg() { [[ "$TORBB_DEBUG" == "true" ]] && printf '[tor:debug] %s\n' "$*" >&2; }
+          log_dbg() { [[ "$TORBB_DEBUG" == "true" ]] && printf '[tor:debug] %s\n' "$*" >&2; true; }
           log_inf() { printf '[tor] %s\n' "$*" >&2; }
           log_err() { printf '[tor:error] %s\n' "$*" >&2; }
           
