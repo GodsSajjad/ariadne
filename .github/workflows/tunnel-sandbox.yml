@@ -17,7 +17,8 @@ concurrency:
 # Safer bash defaults everywhere
 defaults:
   run:
-    shell: bash -euo pipefail {0}
+    shell: bash
+    #shell: bash -euo pipefail {0}
 
 env:
   DEFAULT_PORT: "8080"
@@ -343,6 +344,7 @@ jobs:
         if: env.TUNNEL == 'tor' && runner.os != 'Windows'
         run: |
           # Debug flag (set to true for verbose control interactions; off by default)
+          set -x
           TORBB_DEBUG="${TORBB_DEBUG:-false}"
           log_dbg() { [[ "$TORBB_DEBUG" == "true" ]] && printf '[tor:debug] %s\n' "$*" >&2; }
           log_inf() { printf '[tor] %s\n' "$*" >&2; }
@@ -400,7 +402,7 @@ jobs:
           else
             dirLine="HiddenServiceDir ${HS_DIR}"
             if ! $SUDO grep -qF -- "$dirLine" "${TORRC}"; then
-              $SUDO tee -a "${TORRC}" < ./torrc_tmp >/dev/null
+              cat ./torrc_tmp | $SUDO tee -a "${TORRC}" >/dev/null
             fi
           fi
           rm ./torrc_tmp
