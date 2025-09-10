@@ -316,8 +316,8 @@ jobs:
           sudo pfctl -E
 
       # ------------------ Tor ------------------
-      - name: Install Tor
-        if: env.TUNNEL == 'tor'
+      - name: Install Tor (Linux/macOS)
+        if: env.TUNNEL == 'tor' && runner.os != 'Windows'
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update && sudo apt-get install -y apt-transport-https gpg
@@ -326,19 +326,33 @@ jobs:
             sudo apt-get update && sudo apt-get install -y tor deb.torproject.org-keyring
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             brew install tor
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
-            powershell -Command "
-              \$url = 'https://archive.torproject.org/tor-package-archive/torbrowser/14.5.6/tor-expert-bundle-windows-x86_64-14.5.6.tar.gz'
-              \$tarFile = 'tor-bundle.tar.gz'
-              \$extractPath = 'C:\tor-bundle'
-              Invoke-WebRequest -Uri \$url -OutFile \$tarFile
-              New-Item -ItemType Directory -Path \$extractPath -Force | Out-Null
-              tar -xzf \$tarFile -C \$extractPath
-              \$torExeDir = (Get-ChildItem -Path \$extractPath -Recurse -Filter tor.exe).DirectoryName
-              if (-not \$torExeDir) { Write-Error 'Could not find tor.exe'; exit 1; }
-              'TOR_EXE_PATH=' + (Join-Path \$torExeDir 'tor.exe') | Out-File -FilePath \$env:GITHUB_ENV -Append
-            "
           fi
+
+      - name: Install Tor (Windows)
+        if: env.TUNNEL == 'tor' && runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $url = 'https://archive.torproject.org/tor-package-archive/torbrowser/14.5.6/tor-expert-bundle-windows-x86_64-14.5.6.tar.gz'
+          $tarFile = 'tor-bundle.tar.gz'
+          $extractPath = 'C:\tor-bundle'
+          
+          Write-Host "Downloading Tor Expert Bundle..."
+          Invoke-WebRequest -Uri $url -OutFile $tarFile
+          
+          Write-Host "Creating extraction directory..."
+          New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
+          
+          Write-Host "Extracting archive..."
+          tar -xzf $tarFile -C $extractPath
+          
+          $torExeDir = (Get-ChildItem -Path $extractPath -Recurse -Filter tor.exe).DirectoryName
+          if (-not $torExeDir) {
+            Write-Error 'Could not find tor.exe in the extracted archive.'
+            exit 1
+          }
+          
+          Write-Host "Found tor.exe in '$torExeDir'. Adding to environment..."
+          "TOR_EXE_PATH=$(Join-Path $torExeDir 'tor.exe')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Configure and Start Tor (Linux/macOS)
         if: env.TUNNEL == 'tor' && runner.os != 'Windows'
