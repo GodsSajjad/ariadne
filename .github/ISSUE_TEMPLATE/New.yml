@@ -1,4 +1,4 @@
-name: Tunnel Sandbox
+name: Zegbog
 description: Spin up a Hello World server and expose it via a chosen tunnel.
 title: "[Sandbox]"
 labels: ["tunnel-sandbox"]
