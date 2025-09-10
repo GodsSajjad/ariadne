@@ -549,7 +549,7 @@ jobs:
               `**OS:** \`${os}\`  |  **Tunnel:** \`${tun}\`  |  **App Port:** \`${port}\``, "",
               accessBlock, "",
               `_Max runtime is capped at ${cap} minutes._`,
-              "_Edit this issue to change options (cancels the previous run)._", ""
+              "_Use the **🔧 Control Panel** to change options (cancels the previous run)._", ""
             ].join("\n");
 
             const { data: comments } = await github.rest.issues.listComments({
