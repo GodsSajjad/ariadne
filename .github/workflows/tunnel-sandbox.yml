@@ -1,6 +1,6 @@
 # version
 
-name: Tunnel Sandbox (Cloudflare | lhr | Inlets | Tailscale | Tor)
+name: Tunnel Sandbox (Cloudflare | localhost.run | Tailscale | Tor)
 
 on:
   issues:
@@ -283,9 +283,6 @@ jobs:
           echo "ACCESS_KIND=browser" >> "$GITHUB_ENV"
           echo "ACCESS_VALUE=${found_url}" >> "$GITHUB_ENV"
           echo "ACCESS_NOTE=Open in a regular browser." >> "$GITHUB_ENV"
-
-      # ------------------ Inlets PRO ------------------
-      # ... (Inlets PRO steps remain unchanged)
 
       # ------------------ Tailscale ------------------
       - name: Connect to Tailscale

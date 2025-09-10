@@ -6,17 +6,23 @@ labels: tunnel-sandbox
 assignees: ''
 ---
 
-# 🔧 Control Panel
+# Ariadne Tunnel Sandbox
+
+*Create a variety of tunnels into GitHub Actions runners to serve web content.*
+
+**Each time you toggle an option the action will re-run.**
+
+## 🔧 Control Panel
 
 Select a runner, a tunnel, then check "ON" to start!
 
-## 1. Runner OS (pick ONE)
+### 1. Runner OS (pick ONE)
 
 - [x] Ubuntu (ubuntu-latest)
 - [ ] macOS (macos-14)
 - [ ] Windows (windows-latest)
 
-## 2. Tunnel (pick ONE)
+### 2. Tunnel (pick ONE)
 
 - [x] Cloudflare Tunnel (ephemeral trycloudflare.com)
 - [ ] localhost.run (free SSH reverse tunnel)
@@ -24,11 +30,11 @@ Select a runner, a tunnel, then check "ON" to start!
 - [ ] Tailscale (VPN overlay; SSH port-forward from your device)
 - [ ] Tor (hidden service onion URL)
 
-## 3. Power
+### 3. Power
 
 - [ ] ON (check this box to start the sandbox)
 
-## 4. Config (Optional)
+### 4. Config (Optional)
 
 You can override defaults here. The parser will use the values below if this block is present.
 If this block is removed or values are invalid, the workflow defaults (Port: 8080, Minutes: 40) will be used.
@@ -41,12 +47,6 @@ port: 8080
 minutes: 40
 ```
 
-> **What is this?**
-> Open this issue, tick your options, and the workflow will spin up a short-lived test server on a GitHub Actions runner and expose it via the tunnel you choose. Edit the issue to re-run with new options.
-
-> **What happens next?**
-> After you submit, the bot comments a status block that includes your access link or SSH command. If something fails, it automatically opens a private tmate shell for you.
-
 
 ---
 
@@ -57,19 +57,19 @@ minutes: 40
 
   </summary>
 
-### Notes / Secrets (only if applicable)
+### Overview
 
-**Inlets PRO**
-- `INLETS_REMOTE` (e.g., `wss://inlets.example.com/connect`)
-- `INLETS_TOKEN`
-- `INLETS_LICENSE`
-- (Optional) `INLETS_PUBLIC_URL`
+> **What is this?**
+> Open this issue, tick your options, and the workflow will spin up a short-lived test server on a GitHub Actions runner and expose it via the tunnel you choose. Edit the issue to re-run with new options.
+
+> **What happens next?**
+> After you submit, the bot comments a status block that includes your access link or SSH command. If something fails, it automatically opens a private tmate shell for you.
+
+### Notes / Secrets (only if applicable)
 
 **Tailscale**
 - Maintainer provides an **ephemeral** `TAILSCALE_AUTHKEY` (repo secret).
 - Your device must be logged into the same tailnet. The workflow will comment a copy-paste SSH port-forward command.
-
-> Click options to change them — the action will re-run with the options you select.
 
 ### Tunneling Access Overview
 
