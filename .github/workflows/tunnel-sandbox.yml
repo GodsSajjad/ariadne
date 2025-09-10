@@ -164,7 +164,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          choco install jq git -y
+          # Check if jq is installed
+          if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
+              Write-Output "jq not found, installing via Chocolatey..."
+              choco install jq -y
+          } else {
+              Write-Output "jq is already installed."
+          }
 
       - name: Setup Node
         uses: actions/setup-node@v4
