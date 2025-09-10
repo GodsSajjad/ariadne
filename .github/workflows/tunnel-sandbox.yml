@@ -342,61 +342,238 @@ jobs:
       - name: Configure and Start Tor (Linux/macOS)
         if: env.TUNNEL == 'tor' && runner.os != 'Windows'
         run: |
-          echo "Starting Tor process..."
-          pfx=""
+          # Debug flag (set to true for verbose control interactions; off by default)
+          TORBB_DEBUG="${TORBB_DEBUG:-false}"
+          log_dbg() { [[ "$TORBB_DEBUG" == "true" ]] && printf '[tor:debug] %s\n' "$*" >&2; }
+          log_inf() { printf '[tor] %s\n' "$*" >&2; }
+          log_err() { printf '[tor:error] %s\n' "$*" >&2; }
+          
+          # Timeouts (seconds)
+          TOR_CTRL_TIMEOUT="${TOR_CTRL_TIMEOUT:-5}"
+          TOR_HS_TIMEOUT="${TOR_HS_TIMEOUT:-120}"
+          
+          # OS-specific paths and users
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            cat > ./torrc <<EOF
-          ControlPort 9051
-          CookieAuthentication 1
-          CookieAuthFileGroupReadable 1
-          CookieAuthFile ${pfx}/var/lib/tor/control_auth_cookie
-          HiddenServiceDir ${pfx}/var/lib/tor/hidden_service_${PORT}
-          HiddenServicePort 80 127.0.0.1:${PORT}
-          EOF
-
-            cat ./torrc | sudo tee "${pfx}/etc/tor/torrc" > /dev/null
-            # --- THIS IS THE FIX ---
-            # 1. Copy the config file to a location debian-tor can read.
-            # 2. Ensure debian-tor owns the directories and config.
-            sudo mkdir -p "/var/lib/tor/hidden_service_${PORT}"
-            sudo chown -R debian-tor:debian-tor "/var/lib/tor/hidden_service_${PORT}"
-            sudo chmod 700 "/var/lib/tor/hidden_service_${PORT}"
-            # 3. Run tor pointing to the new, accessible config file.
-            sudo -u debian-tor tor &
+            TORRC="/etc/tor/torrc"
+            TORDIR="/var/lib/tor"
+            TOR_USER="debian-tor"
+            TOR_GROUP="debian-tor"
+            SUDO="sudo"
+            TOR_SERVICE="tor"
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            # The macOS logic is already sound, as brew handles the user context.
             pfx="$(brew --prefix)"
-            cat > ./torrc <<EOF
+            TORRC="${pfx}/etc/tor/torrc"
+            TORDIR="${pfx}/var/lib/tor"
+            TOR_USER="$USER"
+            TOR_GROUP="staff"
+            SUDO="sudo"
+            TOR_SERVICE="tor"
+          fi
+          COOKIE_AUTH_FILE="${TORDIR}/control_auth_cookie"
+          HS_DIR="${TORDIR}/hidden_service_${PORT}"
+          HOSTNAME_FILE="${HS_DIR}/hostname"
+          
+          # Ensure directories
+          log_inf "Ensuring directories..."
+          $SUDO mkdir -p "${TORDIR}" "${HS_DIR}"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            $SUDO chown -R "${TOR_USER}:${TOR_GROUP}" "${TORDIR}" "${HS_DIR}"
+            $SUDO chmod 700 "${HS_DIR}"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            $SUDO chown -R "${TOR_USER}:${TOR_GROUP}" "${TORDIR}" "${HS_DIR}" || true
+            $SUDO chmod 700 "${HS_DIR}"
+          fi
+          
+          # Configure torrc (append HS if not present; ensure ControlPort)
+          log_inf "Configuring torrc at ${TORRC}..."
+          touch ./torrc_tmp
+          cat > ./torrc_tmp <<EOF
           ControlPort 9051
           CookieAuthentication 1
           CookieAuthFileGroupReadable 1
-          CookieAuthFile ${pfx}/var/lib/tor/control_auth_cookie
-          HiddenServiceDir ${pfx}/var/lib/tor/hidden_service_${PORT}
+          CookieAuthFile ${COOKIE_AUTH_FILE}
+          HiddenServiceDir ${HS_DIR}
           HiddenServicePort 80 127.0.0.1:${PORT}
           EOF
-
-            cat ./torrc | sudo tee "${pfx}/etc/tor/torrc" > /dev/null
-            sudo brew services restart tor
+          if [[ ! -f "${TORRC}" ]]; then
+            $SUDO cp ./torrc_tmp "${TORRC}"
+          else
+            dirLine="HiddenServiceDir ${HS_DIR}"
+            if ! $SUDO grep -qF -- "$dirLine" "${TORRC}"; then
+              $SUDO tee -a "${TORRC}" < ./torrc_tmp >/dev/null
+            fi
           fi
-
-          echo "Waiting for hostname file to be created..."
-          # The HOSTNAME_FILE path is now absolute for Linux.
-          HOSTNAME_FILE="${pfx}/var/lib/tor/hidden_service_${PORT}/hostname"
+          rm ./torrc_tmp
+          log_dbg "torrc contents:"
+          $SUDO cat "${TORRC}" >&2 || cat "${TORRC}" >&2
+          
+          # Utilities for control port
+          TIMEOUT_CMD=""
+          require_timeout() {
+            if [[ "$RUNNER_OS" == "macOS" ]]; then
+              command -v gtimeout >/dev/null 2>&1 || brew install coreutils
+              TIMEOUT_CMD="gtimeout"
+            else
+              command -v timeout >/dev/null 2>&1 || { log_err "timeout missing"; return 1; }
+              TIMEOUT_CMD="timeout"
+            fi
+          }
+          build_nc_cmd() {
+            local secs="${1:-5}"
+            if [[ "$RUNNER_OS" == "macOS" ]]; then
+              NC_CMD=( /usr/bin/nc -w "$secs" )
+            else
+              NC_CMD=( nc -q 0 -w "$secs" )
+            fi
+          }
+          nc_probe() {
+            local host="$1" port="$2" secs="${3:-5}"
+            require_timeout || return 1
+            build_nc_cmd "$secs"
+            log_dbg "probe: ${TIMEOUT_CMD} ${secs} ${NC_CMD[*]} $host $port"
+            printf 'PROTOCOLINFO\r\nQUIT\r\n' | "$TIMEOUT_CMD" "$secs" "${NC_CMD[@]}" "$host" "$port" >/dev/null 2>&1 && return 0
+            if [[ "$RUNNER_OS" != "macOS" ]]; then
+              NC_CMD=( nc -w "$secs" )
+              log_dbg "probe-fallback: ${TIMEOUT_CMD} ${secs} ${NC_CMD[*]} $host $port"
+              printf 'PROTOCOLINFO\r\nQUIT\r\n' | "$TIMEOUT_CMD" "$secs" "${NC_CMD[@]}" "$host" "$port" >/dev/null 2>&1 && return 0
+            fi
+            return 1
+          }
+          nc_send() {
+            local host="$1" port="$2" secs="${3:-5}"
+            require_timeout || return 1
+            build_nc_cmd "$secs"
+            log_dbg "send: ${TIMEOUT_CMD} ${secs} ${NC_CMD[*]} $host $port"
+            "$TIMEOUT_CMD" "$secs" "${NC_CMD[@]}" "$host" "$port" 2>>tor_errors.txt || {
+              local status=$?
+              if [[ "$RUNNER_OS" != "macOS" ]]; then
+                NC_CMD=( nc -w "$secs" )
+                log_dbg "send-fallback: ${TIMEOUT_CMD} ${secs} ${NC_CMD[*]} $host $port"
+                "$TIMEOUT_CMD" "$secs" "${NC_CMD[@]}" "$host" "$port" 2>>tor_errors.txt
+                status=$?
+              fi
+              return $status
+            }
+          }
+          torctl_auth_send() {
+            local port="$1"; local cookie_file="$2"; shift 2
+            local cmd="$*"
+            local cookie_hex=""
+            if [[ "$RUNNER_OS" == "Linux" ]]; then
+              cookie_hex="$($SUDO xxd -u -p "$cookie_file" 2>/dev/null | tr -d '\n')"
+            else
+              cookie_hex="$(xxd -u -p "$cookie_file" 2>/dev/null | tr -d '\n')"
+            fi
+            [[ -z "$cookie_hex" ]] && { log_err "empty cookie from $cookie_file"; return 1; }
+            log_dbg "control-cmd(port=$port): $cmd"
+            {
+              printf 'AUTHENTICATE %s\r\n' "$cookie_hex"
+              printf '%s\r\n' "$cmd"
+              printf 'QUIT\r\n'
+            } | nc_send 127.0.0.1 "$port" "$TOR_CTRL_TIMEOUT"
+          }
+          wait_for_control_port() {
+            local port="${1:-9051}"
+            local deadline=$((SECONDS + TOR_CTRL_TIMEOUT + 10))
+            while (( SECONDS < deadline )); do
+              if nc_probe 127.0.0.1 "$port" "$TOR_CTRL_TIMEOUT"; then
+                log_dbg "control port $port reachable"
+                return 0
+              fi
+              sleep 1
+            done
+            log_err "Timeout waiting for control port ${port}"
+            return 1
+          }
+          wait_for_hostname() {
+            local deadline=$((SECONDS + TOR_HS_TIMEOUT))
+            while (( SECONDS < deadline )); do
+              if $SUDO test -f "${HOSTNAME_FILE}"; then
+                log_dbg "hostname file present"
+                return 0
+              fi
+              sleep 1
+            done
+            log_err "Timeout waiting for hostname file (waited ${TOR_HS_TIMEOUT}s)"
+            return 1
+          }
+          
+          # Robust start/reload logic
+          log_inf "Starting or reloading Tor..."
+          CTRL_PORT=9051
+          if nc_probe 127.0.0.1 "$CTRL_PORT" "$TOR_CTRL_TIMEOUT"; then
+            log_inf "Control port open; attempting SIGNAL RELOAD..."
+            resp="$(torctl_auth_send "$CTRL_PORT" "$COOKIE_AUTH_FILE" "SIGNAL RELOAD" || true)"
+            log_dbg "SIGNAL RELOAD response: $(echo "$resp" | tr '\n' ';' | sed 's/;*$//')"
+            if grep -q '^250' <<<"$resp"; then
+              log_inf "Tor config reloaded without restart."
+            else
+              log_inf "Reload failed; trying SIGNAL HUP..."
+              resp="$(torctl_auth_send "$CTRL_PORT" "$COOKIE_AUTH_FILE" "SIGNAL HUP" || true)"
+              log_dbg "SIGNAL HUP response: $(echo "$resp" | tr '\n' ';' | sed 's/;*$//')"
+              if grep -q '^250' <<<"$resp"; then
+                log_inf "Tor config reloaded via HUP."
+              else
+                log_inf "Signals failed; restarting service..."
+                if [[ "$RUNNER_OS" == "Linux" ]]; then
+                  $SUDO systemctl restart "$TOR_SERVICE" >/dev/null 2>&1 || true
+                elif [[ "$RUNNER_OS" == "macOS" ]]; then
+                  $SUDO brew services restart "$TOR_SERVICE" >/dev/null 2>&1 || true
+                fi
+                sleep 2
+                if ! wait_for_control_port "$CTRL_PORT"; then
+                  log_inf "Service restart failed; killing and starting ad-hoc..."
+                  if [[ "$RUNNER_OS" == "Linux" ]]; then
+                    $SUDO pkill -u "$TOR_USER" tor >/dev/null 2>&1 || true
+                    $SUDO -u "$TOR_USER" nohup tor -f "$TORRC" >/dev/null 2>&1 &
+                  elif [[ "$RUNNER_OS" == "macOS" ]]; then
+                    pkill -x tor >/dev/null 2>&1 || true
+                    nohup tor -f "$TORRC" >/dev/null 2>&1 &
+                  fi
+                  if ! wait_for_control_port "$CTRL_PORT"; then
+                    log_err "Tor not listening after ad-hoc start."
+                    exit 1
+                  fi
+                fi
+              fi
+            fi
+          else
+            log_inf "No control port; (re)starting service..."
+            if [[ "$RUNNER_OS" == "Linux" ]]; then
+              $SUDO systemctl restart "$TOR_SERVICE" >/dev/null 2>&1 || true
+            elif [[ "$RUNNER_OS" == "macOS" ]]; then
+              $SUDO brew services restart "$TOR_SERVICE" >/dev/null 2>&1 || $SUDO brew services start "$TOR_SERVICE" >/dev/null 2>&1 || true
+            fi
+            sleep 2
+            if ! wait_for_control_port "$CTRL_PORT"; then
+              log_inf "Service start failed; killing and starting ad-hoc..."
+              if [[ "$RUNNER_OS" == "Linux" ]]; then
+                $SUDO pkill -u "$TOR_USER" tor >/dev/null 2>&1 || true
+                $SUDO -u "$TOR_USER" nohup tor -f "$TORRC" >/dev/null 2>&1 &
+              elif [[ "$RUNNER_OS" == "macOS" ]]; then
+                pkill -x tor >/dev/null 2>&1 || true
+                nohup tor -f "$TORRC" >/dev/null 2>&1 &
+              fi
+              if ! wait_for_control_port "$CTRL_PORT"; then
+                log_err "Tor not listening after ad-hoc start."
+                exit 1
+              fi
+            fi
+          fi
+          
+          # Wait for hostname
+          log_inf "Waiting for hostname file to be created..."
+          wait_for_hostname || exit 1
           onion=""
-          for i in {1..120}; do
-            content=""
-            # Use sudo on Linux because debian-tor owns the file
-            if sudo test -f "$HOSTNAME_FILE"; then
-              content=$(sudo cat "$HOSTNAME_FILE")
-            fi
-            if [[ -n "$content" ]] && [[ "$content" == *".onion"* ]]; then
-              onion=$(echo "$content" | tr -d '[:space:]')
-              break
-            fi
-            sleep 1
-          done
-
-          if [ -z "$onion" ]; then echo "::error::Tor did not generate onion URL"; exit 1; fi
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            onion="$($SUDO cat "$HOSTNAME_FILE" | tr -d '[:space:]')"
+          else
+            onion="$(cat "$HOSTNAME_FILE" | tr -d '[:space:]')"
+          fi
+          if [[ -z "$onion" || ! "$onion" == *".onion"* ]]; then
+            echo "::error::Tor did not generate onion URL"
+            exit 1
+          fi
           echo "PUBLIC_URL=$onion" >> $GITHUB_ENV
           echo "ACCESS_KIND=browser" >> $GITHUB_ENV
           echo "ACCESS_VALUE=$onion" >> $GITHUB_ENV
@@ -411,43 +588,86 @@ jobs:
             Write-Error "TOR_EXE_PATH is not set or tor.exe not found."
             exit 1
           }
-
           $torExePath = $env:TOR_EXE_PATH
-          $appPort    = $env:PORT
-          $workDir    = $PWD.Path
-
-          # Ensure required directories exist
-          New-Item -ItemType Directory -Path (Join-Path $workDir 'tor\hidden_service') -Force | Out-Null
-
-          # Write torrc with safe encoding (no BOM)
+          $appPort = $env:PORT
+          $workDir = $PWD.Path
+          $torDir = Join-Path $workDir 'tor'
+          $hsDir = Join-Path $torDir 'hidden_service'
           $torrcPath = Join-Path $workDir 'torrc'
+          $hostnameFile = Join-Path $hsDir 'hostname'
+          $controlPort = 9051
+          $cookieAuthFile = Join-Path $torDir 'control_auth_cookie'
+          
+          # Ensure directories
+          Write-Host "Ensuring directories..."
+          New-Item -ItemType Directory -Path $hsDir -Force | Out-Null
+          
+          # Configure torrc (overwrite for simplicity in fresh runner)
+          Write-Host "Configuring torrc at $torrcPath..."
           $torrcContent = @"
-          DataDirectory ./tor
-          HiddenServiceDir ./tor/hidden_service
+          DataDirectory $torDir
+          ControlPort $controlPort
+          CookieAuthentication 1
+          HiddenServiceDir $hsDir
           HiddenServiceVersion 3
           HiddenServicePort 80 127.0.0.1:$appPort
           "@
           Set-Content -Path $torrcPath -Value $torrcContent -Encoding UTF8
-
-          Write-Host "Verifying Tor config..."
-          & "$torExePath" -f "$torrcPath" --verify-config
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Tor config verification failed."
-            Get-Content $torrcPath | %{ "torrc: $_" }
-            exit $LASTEXITCODE
+          
+          # Check if Tor is already running (by control port)
+          $torRunning = $false
+          try {
+            $tcpClient = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $controlPort)
+            $tcpClient.Close()
+            $torRunning = $true
+            Write-Host "Tor control port $controlPort is open."
+          } catch {
+            Write-Host "No Tor control port open."
           }
-
-          Write-Host "Starting Tor process..."
-          # Use working directory so relative paths in torrc resolve
+          
+          # Robust start/reload (Windows has no service; check running and restart if needed)
+          Write-Host "Starting or reloading Tor..."
+          if ($torRunning) {
+            # Attempt reload via control (simplified; no full auth send, but kill/restart as fallback)
+            Write-Host "Tor running; attempting hard restart..."
+            Stop-Process -Name "tor" -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+          } else {
+            Write-Host "Tor not running; starting new."
+          }
+          
+          # Start Tor
           Start-Process -FilePath "$torExePath" `
                         -ArgumentList @('-f', "$torrcPath") `
                         -WorkingDirectory "$workDir" `
-                        -NoNewWindow
-
+                        -NoNewWindow -RedirectStandardOutput "tor.log" -RedirectStandardError "tor.err"
+          
+          # Wait for control port
+          $deadline = (Get-Date).AddSeconds(15)
+          $portOpen = $false
+          while ((Get-Date) -lt $deadline) {
+            try {
+              $tcpClient = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $controlPort)
+              $tcpClient.Close()
+              $portOpen = $true
+              Write-Host "Control port $controlPort is open."
+              break
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+          if (-not $portOpen) {
+            Write-Error "Timeout waiting for control port $controlPort"
+            Get-Content "tor.log" | %{ "tor.log: $_" }
+            Get-Content "tor.err" | %{ "tor.err: $_" }
+            exit 1
+          }
+          
+          # Wait for hostname
           Write-Host "Waiting for hostname file to be created..."
-          $hostnameFile = Join-Path $workDir 'tor\hidden_service\hostname'
           $onion = $null
-          for ($i=1; $i -le 120; $i++) {
+          $deadline = (Get-Date).AddSeconds(120)
+          while ((Get-Date) -lt $deadline) {
             if (Test-Path $hostnameFile -PathType Leaf) {
               $content = Get-Content $hostnameFile -ErrorAction SilentlyContinue
               if ($content -and ($content.Trim() -like '*.onion')) {
@@ -457,18 +677,16 @@ jobs:
             }
             Start-Sleep -Seconds 1
           }
-
           if (-not $onion) {
             Write-Error "Tor did not generate an onion URL"
-            # Helpful debug dump
-            Write-Host "Listing tor dir contents:"
-            Get-ChildItem -Recurse (Join-Path $workDir 'tor') | Format-List
+            Get-ChildItem -Recurse $torDir | Format-List
+            Get-Content "tor.log" | %{ "tor.log: $_" }
+            Get-Content "tor.err" | %{ "tor.err: $_" }
             exit 1
           }
-
-          "PUBLIC_URL=$onion"          | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "ACCESS_KIND=browser"        | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "ACCESS_VALUE=$onion"        | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PUBLIC_URL=$onion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ACCESS_KIND=browser" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ACCESS_VALUE=$onion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "ACCESS_NOTE=Requires Tor Browser." | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       # ------------------ Final Status & Keep-Alive ------------------
