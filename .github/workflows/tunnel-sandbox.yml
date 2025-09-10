@@ -181,22 +181,32 @@ jobs:
           server.listen(port, '0.0.0.0', () => console.log(`Listening on ${port}`));
           JS
 
-      - name: Start server & verify port
+      - name: Start server & verify port (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Start-Process -FilePath "node" -ArgumentList "server.js" -RedirectStandardOutput "server.log" -RedirectStandardError "server.log" -NoNewWindow
+          for ($i = 1; $i -le 60; $i++) {
+            if ((Test-NetConnection -ComputerName "127.0.0.1" -Port $env:PORT -WarningAction SilentlyContinue).TcpTestSucceeded) {
+              Write-Output "Port $env:PORT is open."
+              break
+            }
+            if ($i -eq 60) {
+              Write-Output "Server did not start on port $env:PORT in time."
+              exit 1
+            }
+            Start-Sleep -Seconds 1
+          }
+
+      - name: Start server & verify port (macOS/Linux)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           nohup node server.js > server.log 2>&1 &
           for i in {1..60}; do
-            # Use PowerShell for TCP check on Windows, bash for others
-            if [[ "$RUNNER_OS" == "Windows" ]]; then
-              if (Test-NetConnection -ComputerName "127.0.0.1" -Port $env:PORT -WarningAction SilentlyContinue).TcpTestSucceeded {
-                echo "Port $PORT is open."
-                break
-              }
-            else
-              if (echo > /dev/tcp/127.0.0.1/$PORT) >/dev/null 2>&1; then
-                echo "Port $PORT is open."
-                break
-              fi
+            if (echo > /dev/tcp/127.0.0.1/$PORT) >/dev/null 2>&1; then
+              echo "Port $PORT is open."
+              break
             fi
             if [ $i -eq 60 ]; then
               echo "Server did not start on port $PORT in time."
@@ -204,8 +214,6 @@ jobs:
             fi
             sleep 1
           done
-
-      # --- Tunnels ---
 
       # ------------------ Cloudflare Tunnel ------------------
       - name: Start Cloudflare Tunnel
