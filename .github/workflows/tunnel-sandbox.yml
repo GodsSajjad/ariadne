@@ -397,17 +397,13 @@ jobs:
           HiddenServiceDir ${HS_DIR}
           HiddenServicePort 80 127.0.0.1:${PORT}
           EOF
-          if [[ ! -f "${TORRC}" ]]; then
-            $SUDO cp ./torrc_tmp "${TORRC}"
-          else
-            dirLine="HiddenServiceDir ${HS_DIR}"
-            if ! $SUDO grep -qF -- "$dirLine" "${TORRC}"; then
-              cat ./torrc_tmp | $SUDO tee -a "${TORRC}" >/dev/null
-            fi
+          dirLine="HiddenServiceDir ${HS_DIR}"
+          if ! $SUDO grep -qF -- "$dirLine" "${TORRC}"; then
+            cat ./torrc_tmp | $SUDO tee -a "${TORRC}" >/dev/null
           fi
-          rm ./torrc_tmp
+          rm -f ./torrc_tmp
           log_dbg "torrc contents:"
-          $SUDO cat "${TORRC}" >&2 || cat "${TORRC}" >&2
+          $SUDO cat "${TORRC}" >&2  || true
           
           # Utilities for control port
           TIMEOUT_CMD=""
