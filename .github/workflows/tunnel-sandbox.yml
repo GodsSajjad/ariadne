@@ -193,7 +193,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          Start-Process -FilePath "node" -ArgumentList "server.js" -RedirectStandardOutput "server-out.log" -RedirectStandardError "server-err.log" -NoNewWindow
+          Start-Process -FilePath "node222.exe" -ArgumentList "server.js" -RedirectStandardOutput "server-out.log" -RedirectStandardError "server-err.log" -NoNewWindow
           for ($i = 1; $i -le 60; $i++) {
             if ((Test-NetConnection -ComputerName "127.0.0.1" -Port $env:PORT -WarningAction SilentlyContinue).TcpTestSucceeded) {
               Write-Output "Port $env:PORT is open."
