@@ -341,45 +341,45 @@ jobs:
       - name: Configure and Start Tor (Linux/macOS)
         if: env.TUNNEL == 'tor' && runner.os != 'Windows'
         run: |
-          mkdir -p ./tor ./tor/hidden_service
-
+          mkdir -p ./tor
           cat > ./torrc <<EOF
-          DataDirectory $(pwd)/tor
-          HiddenServiceDir $(pwd)/tor/hidden_service
+          DataDirectory /var/lib/tor/hidden_service_dir
+          HiddenServiceDir /var/lib/tor/hidden_service_dir/hs
           HiddenServiceVersion 3
           HiddenServicePort 80 127.0.0.1:${PORT}
           EOF
 
           echo "Starting Tor process..."
-
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            # Ensure debian-tor can read config and own dirs
-            sudo chown debian-tor:debian-tor ./torrc
-            sudo chmod 0644 ./torrc
-            sudo chown -R debian-tor:debian-tor ./tor
-            sudo chmod 0700 ./tor ./tor/hidden_service
+            # --- THIS IS THE FIX ---
+            # 1. Copy the config file to a location debian-tor can read.
+            sudo cp ./torrc /etc/tor/torrc.ariadne
+            # 2. Ensure debian-tor owns the directories and config.
+            sudo chown -R debian-tor:debian-tor /var/lib/tor/hidden_service_dir
+            sudo chown debian-tor:debian-tor /etc/tor/torrc.ariadne
+            # 3. Run tor pointing to the new, accessible config file.
+            sudo -u debian-tor tor -f /etc/tor/torrc.ariadne &
 
-            # (Optional sanity check)
-            sudo -u debian-tor tor -f "$(pwd)/torrc" --verify-config
-
-            # Launch tor in background
-            sudo -u debian-tor tor -f "$(pwd)/torrc" &
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            # The macOS logic is already sound, as brew handles the user context.
             echo "torrc_file=$(pwd)/torrc" | sudo tee "$(brew --prefix)/etc/tor/custom.conf" > /dev/null
             sudo brew services restart tor
           fi
 
           echo "Waiting for hostname file to be created..."
-          HOSTNAME_FILE="$(pwd)/tor/hidden_service/hostname"
+          # The HOSTNAME_FILE path is now absolute for Linux.
+          HOSTNAME_FILE="/var/lib/tor/hidden_service_dir/hs/hostname"
           onion=""
-
           for i in {1..120}; do
             content=""
+            # Use sudo on Linux because debian-tor owns the file
             if [[ "$RUNNER_OS" == "Linux" ]] && sudo test -f "$HOSTNAME_FILE"; then
               content=$(sudo cat "$HOSTNAME_FILE")
-            elif test -f "$HOSTNAME_FILE"; then
-              content=$(cat "$HOSTNAME_FILE")
+            # The macOS check can remain as-is if we adjust its DataDirectory
+            elif [[ "$RUNNER_OS" == "macOS" ]] && test -f "$(pwd)/tor/hidden_service/hostname"; then
+               content=$(cat "$(pwd)/tor/hidden_service/hostname")
             fi
+
             if [[ -n "$content" ]] && [[ "$content" == *".onion"* ]]; then
               onion=$(echo "$content" | tr -d '[:space:]')
               break
@@ -387,11 +387,7 @@ jobs:
             sleep 1
           done
 
-          if [ -z "$onion" ]; then
-            echo "::error::Tor did not generate onion URL"
-            exit 1
-          fi
-
+          if [ -z "$onion" ]; then echo "::error::Tor did not generate onion URL"; exit 1; fi
           echo "PUBLIC_URL=$onion" >> $GITHUB_ENV
           echo "ACCESS_KIND=browser" >> $GITHUB_ENV
           echo "ACCESS_VALUE=$onion" >> $GITHUB_ENV
