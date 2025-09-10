@@ -658,8 +658,7 @@ jobs:
           # Start Tor
           Start-Process -FilePath "$torExePath" `
                         -ArgumentList @('-f', "$torrcPath") `
-                        -WorkingDirectory "$workDir" `
-                        -NoNewWindow -RedirectStandardOutput "tor.log" -RedirectStandardError "tor.err"
+                        -RedirectStandardOutput "tor.log" -RedirectStandardError "tor.err"
           
           # Wait for control port
           $deadline = (Get-Date).AddSeconds(15)
@@ -775,6 +774,14 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
             }
+
+      - name: tmate rescue shell (on failure)
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 10 # debug window minutes
+        with:
+          detached: true
+          limit-access-to-actor: true
+        id: tmate-og
 
       - name: Keep session alive
         run: |
