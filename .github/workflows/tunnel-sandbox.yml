@@ -279,7 +279,7 @@ jobs:
           echo "ACCESS_NOTE=Open in a regular browser." >> "$GITHUB_ENV"
 
       # ------------------ ngrok ------------------
-      - name: Gate ngrok: require token & update status
+      - name: Gate ngrok & require token & update status
         if: env.TUNNEL == 'ngrok'
         uses: actions/github-script@v7
         env:
