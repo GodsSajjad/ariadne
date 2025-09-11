@@ -86,6 +86,5 @@ minutes: 40
 </details>
 
 > † *needs [Tailscale](https://tailscale.com/kb/1347/installation) at your access point*
-
 > ‡ *needs [Tor Browser](https://www.torproject.org/download/) at your access point*
 
