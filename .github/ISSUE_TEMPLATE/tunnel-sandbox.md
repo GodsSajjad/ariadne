@@ -1,6 +1,3 @@
-Sweet—moved the feature table out of the template and linked to the README’s table. Here’s the updated **issue template** (drop in at `.github/ISSUE_TEMPLATE/tunnel-sandbox.md`):
-
-````markdown
 ---
 name: Tunnel Sandbox
 about: Spin up a Hello World server and expose it via a chosen tunnel
