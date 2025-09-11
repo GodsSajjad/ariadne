@@ -279,50 +279,98 @@ jobs:
           echo "ACCESS_NOTE=Open in a regular browser." >> "$GITHUB_ENV"
 
       # ------------------ ngrok ------------------
+      - name: Gate ngrok: require token & update status
+        if: env.TUNNEL == 'ngrok'
+        uses: actions/github-script@v7
+        env:
+          STATUS_MARK: ${{ env.STATUS_MARK }}
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+        with:
+          script: |
+            const token = process.env.NGROK_AUTHTOKEN || "";
+            const mark  = process.env.STATUS_MARK;
+            if (!token) {
+              const body = [
+                mark,
+                "### Tunnel Sandbox · Status",
+                "",
+                "❌ **ngrok cannot start** — no `NGROK_AUTHTOKEN` secret found.",
+                "",
+                "👉 **How to fix**",
+                "1) Go to **Settings → Secrets and variables → Actions → New repository secret**",
+                "2) Add a secret named **`NGROK_AUTHTOKEN`** with your ngrok auth token",
+                "3) Edit this issue (or toggle ON again) to re-run",
+                ""
+              ].join("\n");
+
+              // Upsert comment
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                per_page: 100
+              });
+              const prev = comments.find(c => c.body && c.body.includes(mark));
+              if (prev) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner, repo: context.repo.repo, comment_id: prev.id, body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body
+                });
+              }
+
+              // Freeze later status updates from overwriting this message
+              require('fs').appendFileSync(process.env.GITHUB_ENV, `STATUS_FREEZE=true\n`);
+              core.setFailed("NGROK_AUTHTOKEN missing — required for ngrok to function.");
+            } else {
+              // Export for subsequent steps
+              require('fs').appendFileSync(process.env.GITHUB_ENV, `NGROK_AUTHTOKEN=${token}\n`);
+              core.info("NGROK_AUTHTOKEN present; proceeding.");
+            }
+
       - name: Start ngrok Tunnel
         if: env.TUNNEL == 'ngrok'
         shell: bash
         run: |
-          # 1. Download and install ngrok. This is the tokenless, short-session version for testing.
-          echo "Downloading ngrok..."
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | tar xz
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-darwin-amd64.zip -o ngrok.zip && unzip -o ngrok.zip
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
-            curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -o ngrok.zip && unzip -o ngrok.zip
-          fi
-          sudo mv ./ngrok /usr/local/bin/
+          set -euo pipefail
+          : "${NGROK_AUTHTOKEN:?NGROK_AUTHTOKEN must be set (guarded by previous step)}"
 
-          # 2. Start ngrok in the background.
-          #    Without an auth token, ngrok sessions are very short and show a warning page.
-          echo "Starting ngrok..."
+          echo "Installing ngrok…"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            curl -sSfL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | tar xz
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            curl -sSfL -o ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-darwin-amd64.zip && unzip -o ngrok.zip
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl -sSfL -o ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip && unzip -o ngrok.zip
+          fi
+          sudo mv ./ngrok /usr/local/bin/ 2>/dev/null || { mv ./ngrok "$HOME/ngrok"; export PATH="$HOME:$PATH"; }
+
+          echo "Configuring ngrok auth…"
+          ngrok config add-authtoken "$NGROK_AUTHTOKEN"
+
+          echo "Starting ngrok http ${PORT}…"
           nohup ngrok http "${PORT}" --log=stdout > ngrok.log 2>&1 &
 
-          # 3. Scrape the public URL from the ngrok API (more reliable than logs)
+          # Discover public URL
           for i in {1..30}; do
-            URL=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[] | select(.proto=="https") | .public_url // ""' | head -n1)
-            if [[ -n "$URL" && "$URL" != "null" ]]; then
-              echo "ngrok URL found: $URL"
-              break
-            fi
-            echo "Waiting for ngrok API..."
+            URL="$(curl -sf http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[] | select(.proto=="https") | .public_url // ""' | head -n1 || true)"
+            [[ -n "$URL" && "$URL" != "null" ]] && break
             sleep 2
           done
 
-          if [[ -z "$URL" ]]; then
-            echo "::error::Failed to obtain ngrok URL from API."
-            cat ngrok.log
+          if [[ -z "${URL:-}" ]]; then
+            echo "::error::Failed to obtain ngrok URL from local API."
+            tail -n 200 ngrok.log || true
             exit 1
           fi
 
-          # 4. Set environment variables for the status comment
-          NOTE="Open in a regular browser. NOTE: This is a temporary session. For a longer, stable session, add an NGROK_AUTHTOKEN to this repository's secrets."
-          echo "PUBLIC_URL=${URL}" >> $GITHUB_ENV
-          echo "ACCESS_KIND=browser" >> $GITHUB_ENV
-          echo "ACCESS_VALUE=${URL}" >> $GITHUB_ENV
-          echo "ACCESS_NOTE=${NOTE}" >> $GITHUB_ENV
-
+          echo "PUBLIC_URL=${URL}" >> "$GITHUB_ENV"
+          echo "ACCESS_KIND=browser" >> "$GITHUB_ENV"
+          echo "ACCESS_VALUE=${URL}" >> "$GITHUB_ENV"
+          echo "ACCESS_NOTE=Open in a regular browser. (Authenticated ngrok session.)" >> "$GITHUB_ENV"
+    
       # ------------------ Tailscale ------------------
       - name: Connect to Tailscale
         if: env.TUNNEL == 'tailscale'
@@ -717,6 +765,7 @@ jobs:
       - name: Upsert status comment (final access)
         if: always()
         uses: actions/github-script@v7
+        timeout-minutes: 2
         env:
           PUBLIC_URL: ${{ env.PUBLIC_URL }}
           TS_IP: ${{ env.TS_IP }}
@@ -737,6 +786,12 @@ jobs:
             const cap  = process.env.MAX_CAP_MINUTES;
             const user = os == 'Windows' ? 'runneradmin' : 'runner';
             let accessBlock = "Tunnel failed to initialize.";
+
+            // Do not overwrite a blocking error message (e.g., missing ngrok token)
+            if (process.env.STATUS_FREEZE === 'true') {
+              core.info('STATUS_FREEZE=true — preserving previous status comment.');
+              return;
+            }
 
             if (val) {
               if (kind === "info") {
