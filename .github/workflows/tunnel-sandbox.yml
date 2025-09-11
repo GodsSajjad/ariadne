@@ -930,14 +930,6 @@ jobs:
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
             }
 
-      - name: tmate rescue shell (for debug)
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 10 # debug window minutes
-        with:
-          detached: true
-          limit-access-to-actor: true
-        id: tmate-og
-
       - name: Keep session alive
         run: |
           want_secs=$(( KEEP_MINUTES * 60 ))
@@ -961,14 +953,15 @@ jobs:
           echo '--- inlets.log ---'; tail -n 120 inlets.log || true
           echo '--- tor/tor.log ---'; tail -n 120 tor/tor.log || true
 
+      # Failure-time debug shell that exposes outputs we’ll use
       - name: tmate rescue shell (on failure)
         if: failure()
         uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 10 # debug window minutes
+        id: tmate
+        timeout-minutes: 10
         with:
           detached: true
           limit-access-to-actor: true
-        id: tmate
 
       - name: Cleanup Tor scheduled task (always)
         if: env.TUNNEL == 'tor' && runner.os == 'Windows'
@@ -980,20 +973,33 @@ jobs:
       - name: Upsert status comment (tmate)
         if: failure()
         uses: actions/github-script@v7
+        env:
+          STATUS_MARK: ${{ env.STATUS_MARK }}
+          DEBUG_WINDOW_MINUTES: ${{ env.DEBUG_WINDOW_MINUTES }}
+          SSH_CMD: ${{ steps.tmate.outputs['ssh-command'] }}
+          SSH_ADDR: ${{ steps.tmate.outputs['ssh-address'] }}
+          WEB_URL: ${{ steps.tmate.outputs['web-url'] }}
         with:
           script: |
             const mark = process.env.STATUS_MARK;
-            const ssh = `${{ steps.tmate.outputs.sshCommand }}`.trim();
-            const web = `${{ steps.tmate.outputs.webUrl }}`.trim();
+            const ssh  = (process.env.SSH_CMD || '').trim();
+            const web  = (process.env.WEB_URL || '').trim();
+
             const body = [
               mark, "### Tunnel Sandbox · Status", "",
               "❗ **Job failed** — opening a debug shell.", "",
-              "**SSH:**", "```bash\n" + ssh + "\n```",
-              `**Web shell:** ${web}`, "",
-              `_This stays open for ${process.env.DEBUG_WINDOW_MINUTES} minutes._`, ""
-            ].join("\n");
+              "**SSH:**",
+              "```bash",
+              ssh || "(not available)",
+              "```",
+              web ? `**Web shell:** ${web}` : "",
+              "",
+              `_This stays open for ${process.env.DEBUG_WINDOW_MINUTES} minutes._`,
+              ""
+            ].filter(Boolean).join("\n");
+
             const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100
             });
             const prev = comments.find(c => c.body && c.body.includes(mark));
             if (prev) {
@@ -1001,3 +1007,4 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
             }
+ 
