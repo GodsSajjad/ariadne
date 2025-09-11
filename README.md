@@ -1,4 +1,4 @@
-# Ariadne: turn **2000 free Actions minutes** into live demos
+# Ariadne: turn your **2000 free Actions minutes** into live demos
 
 Spin up an ephemeral server on a GitHub Actions runner and get a **shareable URL**—from a single GitHub issue. Pick the OS, pick a tunnel, check **ON**. A bot replies with the link or SSH command.
 
