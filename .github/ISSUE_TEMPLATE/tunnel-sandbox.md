@@ -1,12 +1,14 @@
 ---
 name: Tunnel Sandbox
-about: Spin up a Hello World server and expose it via a chosen tunnel
-title: Start a Hello World Server and Expose it via Different Tunnels
+about: Spin up a Hello World server and expose it via a chosen tunnel.
+title: Tunnel Sandbox
 labels: tunnel-sandbox
 assignees: ''
 ---
 
 # Ariadne
+
+Start a Hello World Server and Expose it via Different Tunnels.
 
 ## 🔧 Control Panel
 
