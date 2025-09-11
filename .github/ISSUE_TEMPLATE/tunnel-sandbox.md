@@ -17,8 +17,7 @@ assignees: ''
 > Toggle the **Control Panel** checkboxes any time to reconfigure. You can also edit the issue. The previous run cancels, a fresh one starts, and the status comment updates.
 
 > [!NOTE]
-> Want tunnel comparisons? See the **full table in the README** →  
-> **`../../blob/main/README.md#tunnels-supported`**
+> Want tunnel comparisons? See the **full table in the README](../blob/main/README.md#tunnels-supported)** →  
 
 ---
 
@@ -36,12 +35,12 @@ Select a runner OS and tunnel, then check **ON** to start.
 
 - [x] Cloudflare Tunnel
 - [ ] localhost.run
-- [ ] ngrok<sup>*</sup>
+- [ ] ngrok<sup>\*</sup>
 - [ ] Tailscale<sup>†</sup>
 - [ ] Tor<sup>‡</sup>
 - [ ] Tunnelmole
 
-### 3. Power (toggle on or off)
+### 3. Power (power on your runner)
 
 - [ ] ON (check this box to start the sandbox)
 
@@ -73,26 +72,27 @@ minutes: 40
 
 ### Requirements for some tunnels
 
-> \[!IMPORTANT]
+> [!IMPORTANT]
 > **ngrok** (*token required*)
-> Add a repository secret named **`NGROK_AUTHTOKEN`**. If it’s missing, the run fails early and the status comment tells you how to fix it.
+> Add a repository secret named **`NGROK_AUTHTOKEN`**. If it’s missing, the run fails early and the status comment tells you how to add it.
 >
 > 1. Create a free ngrok account. 2) Add `NGROK_AUTHTOKEN` as an Actions repo secret.
 
-> \[!NOTE]
-> **Tailscale** (private, no public URL)
+> [!NOTE]
+> **Tailscale** (private VPN, no public access)
 >
 > 1. Add an **ephemeral** `TAILSCALE_AUTHKEY` as an Actions repo secret.
 > 2. Your access device and the runner must be on the **same tailnet**.
 > 3. Enable **Tailscale SSH** and update ACLs to allow “accept” for SSH to the runner’s tag.
-> 4. **Tip:** Turn off other VPNs (ExpressVPN, NordVPN, etc.) while using Tailscale to avoid dropped tailnet packets.
+> 4. **Tip:** Turn off other VPNs (ExpressVPN, NordVPN, etc.) while using Tailscale to avoid connection issues.
+> 5. **Tip:** Can't access the Internet while on Tailscale? Open Settings and uncheck "Use Tailscale DNS Settings".
 
 > **Tor** (requires Tor Browser)
-> Use the \[Tor Browser] to open the `.onion` URL the bot posts.
+> Use the [Tor Browser] to open the `.onion` URL the bot posts.
 
 ---
 
-> \[!TIP]
-> Compare tunnels (perf, NAT, privacy): **`../blob/main/README.md#tunnels-supported`**
+> [!TIP]
+> Compare tunnels (perf, NAT, privacy): **[README](../blob/main/README.md#tunnels-supported)**
 
 </details>
