@@ -1,3 +1,6 @@
+Sweet—moved the feature table out of the template and linked to the README’s table. Here’s the updated **issue template** (drop in at `.github/ISSUE_TEMPLATE/tunnel-sandbox.md`):
+
+````markdown
 ---
 name: Tunnel Sandbox
 about: Spin up a Hello World server and expose it via a chosen tunnel
@@ -8,35 +11,47 @@ assignees: ''
 
 # Ariadne Tunnel Sandbox
 
-*This sandbox lets you create a variety of tunnels into a GitHub Actions runner to serve web content. Each time you edit and save the issue, the action will re-run with the new options.*
+*Spin up a short-lived server on a GitHub Actions runner and expose it with your tunnel of choice. Each time you change the Control Panel below and save, the workflow re-runs with the new options. You can also edit this comment directly.*
+
+> [!WARNING]
+> **Public URL = public.** Don’t serve secrets. Sessions are ephemeral and auto-stop.
+
+> [!TIP]
+> Toggle the **Control Panel** checkboxes any time to reconfigure. You can also edit the issue. The previous run cancels, a fresh one starts, and the status comment updates.
+
+> [!NOTE]
+> Want tunnel comparisons? See the **full table in the README** →  
+> **`../../blob/main/README.md#tunnels-supported`**
+
+---
 
 ## 🔧 Control Panel
 
-Select a runner OS and a tunnel type, then check the "ON" box to start.
+Select a runner OS and tunnel, then check **ON** to start.
 
-### 1. Runner OS (pick ONE)
+### 1. Runner OS (select one OS)
 
 - [x] Ubuntu (ubuntu-latest)
 - [ ] macOS (macos-14)
 - [ ] Windows (windows-latest)
 
-### 2. Tunnel (pick ONE)
+### 2. Tunnel (select one tunnel)
 
 - [x] Cloudflare Tunnel
 - [ ] localhost.run
-- [ ] ngrok\*
-- [ ] Tailscale†
-- [ ] Tor‡
+- [ ] ngrok<sup>*</sup>
+- [ ] Tailscale<sup>†</sup>
+- [ ] Tor<sup>‡</sup>
 - [ ] Tunnelmole
 
-### 3. Power
+### 3. Power (toggle on or off)
 
 - [ ] ON (check this box to start the sandbox)
 
 ### 4. Config (Optional)
 
 You can override the defaults here. The parser will use these values if the block is present.
-If this block is removed or the values are invalid, the workflow will use its defaults (Port: 8080, Minutes: 40).
+If the block is removed or invalid, defaults apply (Port: 8080, Minutes: 40).
 
 ```yaml
 # Port the Hello World server will listen on
@@ -44,48 +59,43 @@ port: 8080
 
 # Minutes to keep the runner alive (workflow hard-cap is 80)
 minutes: 40
-```
+````
 
 <details>
-  <summary>
-
-## How it Works & Tunnel Details
-
-  </summary>
+  <summary><strong>Overview, Requirements & Troubleshooting</strong></summary>
 
 ### Overview
 
 > **What is this?**
-> When you open or edit this issue, a workflow spins up a short-lived test server on a GitHub Actions runner and exposes it using the tunnel you choose.
+> Opening or editing this issue launches a short-lived server on a GitHub Actions runner (Ubuntu, macOS, or Windows) and exposes it via the tunnel you pick. It demonstrates a clean “issue-as-control-panel” pattern, and it’s easy to copy into your repo so people can try your app **without** provisioning infra. Every GitHub user gets \~2,000 free Actions minutes per month—put them to work.
 
-> **What happens next?**
-> A bot will post a status comment below, which will update with your access link or command. If the job fails, it will automatically provide a temporary debug shell.
+> **What happens after I change options?**
+> A bot posts a status comment with your access method (URL or SSH command) and updates it automatically. If something breaks, it opens a short debug shell.
 
-### Required Secrets (if using these tunnels)
+---
 
-**ngrok***
-1. Sign up for a free [ngrok account](https://ngrok.com).
-2. Add your `NGROK_AUTHTOKEN` as a repository secret.
+### Requirements for some tunnels
 
-**Tailscale†**
-1. Sign up for a free [Tailscale account](https://tailscale.com).
-2. Add an **ephemeral** `TAILSCALE_AUTHKEY` as a Actions repository secret.
-3. Your access device must be logged into the same tailnet.
+> \[!IMPORTANT]
+> **ngrok** (*token required*)
+> Add a repository secret named **`NGROK_AUTHTOKEN`**. If it’s missing, the run fails early and the status comment tells you how to fix it.
+>
+> 1. Create a free ngrok account. 2) Add `NGROK_AUTHTOKEN` as an Actions repo secret.
 
-### Tunneling Access Overview
+> \[!NOTE]
+> **Tailscale** (private, no public URL)
+>
+> 1. Add an **ephemeral** `TAILSCALE_AUTHKEY` as an Actions repo secret.
+> 2. Your access device and the runner must be on the **same tailnet**.
+> 3. Enable **Tailscale SSH** and update ACLs to allow “accept” for SSH to the runner’s tag.
+> 4. **Tip:** Turn off other VPNs (ExpressVPN, NordVPN, etc.) while using Tailscale to avoid dropped tailnet packets.
 
-| Option | Public link? | Setup (Runner → User) | Typical Perf. | Reliability/NAT | Privacy / Exposure | Best For |
-|---|---|---|---|---|---|---|
-| **Cloudflare Tunnel** | Yes (`*.trycloudflare.com`) | Auto-install client → you click URL | Good–Very Good | High | Public at edge; origin stays private | Quick public demos |
-| **localhost.run** | Yes (`http(s)://…lhr.life`) | SSH reverse tunnel → URL is generated | OK–Good | Medium | Public at edge | Fast, zero-config link |
-| **ngrok*** | Yes (`*.ngrok-free.app`) | Auto-install client → you click URL | Good–Very Good | High | Public at edge; shows interstitial page | Quick demos & webhook testing |
-| **Tailscale†** | No public URL | Runner joins tailnet → you SSH port-forward | LAN-like, low latency | Very High | Private to your tailnet | Private team access / debugging |
-| **Tor‡** | Yes (`.onion`) | Local hidden service → onion URL | Variable (high latency) | High | Pseudonymous; Tor-only access | Privacy-focused access |
+> **Tor** (requires Tor Browser)
+> Use the \[Tor Browser] to open the `.onion` URL the bot posts.
 
-> **Notes:**
-> • ***ngrok** sessions are temporary unless an `NGROK_AUTHTOKEN` secret is provided.*
-> • **†Tailscale** requires you (and testers) to be on the same tailnet; we provide a ready-to-use `ssh -L ...` command.
-> • **‡Tor** requires the [Tor Browser](https://www.torproject.org/download/) to visit `.onion` URLs.
-> • **Max runtime is capped at 80 minutes**, even if you request longer.
+---
+
+> \[!TIP]
+> Compare tunnels (perf, NAT, privacy): **`../blob/main/README.md#tunnels-supported`**
 
 </details>
