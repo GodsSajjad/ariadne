@@ -7,7 +7,7 @@ assignees: ''
 ---
 # Ariadne
 
-Start a Hello World Server and Expose it via Different Tunnels.
+Start a Hello World server and expose it via various tunnels.
 
 ## 🔧 Control Panel
 
