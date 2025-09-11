@@ -761,6 +761,84 @@ jobs:
           "ACCESS_VALUE=$onion"                 | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "ACCESS_NOTE=Requires Tor Browser."   | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # ------------------ Tunnelmole (macOS/Linux) ------------------
+      - name: Start Tunnelmole
+        if: env.TUNNEL == 'tunnelmole' && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Install the CLI (uses Node already set up by actions/setup-node)
+          npm i -g tunnelmole >/dev/null 2>&1 || npm i -g tunnelmole
+
+          # Run tmole in the background; disable telemetry for CI noise
+          LOG_TM="tunnelmole.log"; : > "$LOG_TM"
+          ( TUNNELMOLE_TELEMETRY=0 tmole "${PORT}" > "$LOG_TM" 2>&1 ) &
+
+          # Discover the public HTTPS URL from the log
+          URL=""
+          for i in {1..60}; do
+            URL="$(grep -Eo 'https://[a-zA-Z0-9._-]+\.tunnelmole\.(net|com)' "$LOG_TM" | head -n1 || true)"
+            if [[ -n "$URL" ]]; then
+              echo "Tunnelmole URL: $URL"
+              break
+            fi
+            sleep 1
+          done
+
+          if [[ -z "$URL" ]]; then
+            echo "::error::Failed to obtain Tunnelmole URL."
+            tail -n 200 "$LOG_TM" || true
+            exit 1
+          fi
+
+          # Export for status comment
+          echo "PUBLIC_URL=${URL}"            >> "$GITHUB_ENV"
+          echo "ACCESS_KIND=browser"          >> "$GITHUB_ENV"
+          echo "ACCESS_VALUE=${URL}"          >> "$GITHUB_ENV"
+          echo "ACCESS_NOTE=Open in a regular browser. (Tunnelmole HTTPS URL.)" >> "$GITHUB_ENV"
+
+      # ------------------ Tunnelmole (Windows) ------------------
+      - name: Start Tunnelmole (Windows)
+        if: env.TUNNEL == 'tunnelmole' && runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Install CLI via npm (Node is already set up earlier)
+          npm i -g tunnelmole | Out-Null
+
+          # Paths / logs
+          $log = Join-Path $PWD 'tunnelmole.log'
+          if (Test-Path $log) { Remove-Item $log -Force }
+          New-Item -ItemType File -Path $log -Force | Out-Null
+
+          # Launch tmole in background; disable telemetry
+          $env:TUNNELMOLE_TELEMETRY = '0'
+          Start-Process -FilePath "tmole.cmd" -ArgumentList "$env:PORT" -RedirectStandardOutput $log -RedirectStandardError $log
+
+          # Poll the log for an HTTPS Tunnelmole URL
+          $url = $null
+          for ($i = 1; $i -le 60; $i++) {
+            if (Test-Path $log) {
+              $content = Get-Content $log -Raw
+              $m = [regex]::Match($content, 'https://[a-zA-Z0-9._-]+\.tunnelmole\.(net|com)')
+              if ($m.Success) { $url = $m.Value; break }
+            }
+            Start-Sleep -Seconds 1
+          }
+
+          if (-not $url) {
+            Write-Error "Failed to obtain Tunnelmole URL."
+            Get-Content $log -Tail 200 | Write-Host
+            exit 1
+          }
+
+          "PUBLIC_URL=$url"                                   | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ACCESS_KIND=browser"                               | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ACCESS_VALUE=$url"                                 | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ACCESS_NOTE=Open in a regular browser. (Tunnelmole HTTPS URL.)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       # ------------------ Final Status & Keep-Alive ------------------
       - name: Upsert status comment (final access)
         if: always()

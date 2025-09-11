@@ -74,6 +74,7 @@ parse_issue_body() { # stdin markdown → stdout key=value
   checked "$lcfile" "ngrok"         && TUNNEL="ngrok"
   checked "$lcfile" "tailscale"     && TUNNEL="tailscale"
   checked "$lcfile" "tor"           && TUNNEL="tor"
+  checked "$lcfile" "tunnelmol"     && TUNNEL="tunnelmole"
 
   # yaml → everything else
   yaml="$(extract_yaml_block <"$body" || true)"

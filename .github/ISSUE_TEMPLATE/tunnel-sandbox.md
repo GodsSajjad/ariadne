@@ -27,6 +27,7 @@ Select a runner OS and a tunnel type, then check the "ON" box to start.
 - [ ] ngrok\*
 - [ ] Tailscale†
 - [ ] Tor‡
+- [ ] Tunnelmole
 
 ### 3. Power
 
