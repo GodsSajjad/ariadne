@@ -1,6 +1,8 @@
 # Ariadne: turn your **2000 free Actions minutes** into live demos
 
-Spin up an ephemeral server on a GitHub Actions runner and get a **shareable URL**—from a single GitHub issue. Pick the OS, pick a tunnel, check **ON**. A bot replies with the link or SSH command.
+Start a Hello World server and expose it with different tunnels, all from an issue.
+
+You can bring your own server to run an ephemeral server on a GitHub Actions runner and get a **shareable URL**—from a single GitHub issue. Pick the OS, pick a tunnel, check **ON** in the issue - and the server will start. A bot replies with the link or SSH command for Tailscale.
 
 ## TL;DR — Try it in \~60 seconds
 

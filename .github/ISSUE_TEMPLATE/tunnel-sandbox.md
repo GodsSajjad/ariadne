@@ -1,7 +1,7 @@
 ---
 name: Tunnel Sandbox
 about: Spin up a Hello World server and expose it via a chosen tunnel
-title: Tunnel Sandbox
+title: Start a Hello World Server and Expose it via Different Tunnels
 labels: tunnel-sandbox
 assignees: ''
 ---
