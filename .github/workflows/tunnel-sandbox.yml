@@ -135,7 +135,7 @@ jobs:
     needs: parse
     if: needs.parse.result == 'success' && needs.parse.outputs.on == 'true'
     runs-on: ${{ needs.parse.outputs.os }}
-    timeout-minutes: 40
+    timeout-minutes: 90
     env:
       PORT: ${{ needs.parse.outputs.port }}
       KEEP_MINUTES: ${{ needs.parse.outputs.minutes }}
@@ -938,7 +938,55 @@ jobs:
           if (( secs > cap_secs )); then secs=$cap_secs; fi
           echo "Keeping session alive for $(( secs / 60 )) minute(s)."
           sleep $secs
+          echo "RUNTIME_MINS=$(( secs / 60 ))" >> "$GITHUB_ENV"   # <— add this line
           echo "Time up."
+
+      - name: Upsert status comment (ended)
+        if: success()
+        uses: actions/github-script@v7
+        env:
+          STATUS_MARK: ${{ env.STATUS_MARK }}
+          RUNTIME_MINS: ${{ env.RUNTIME_MINS }}
+          MAX_CAP_MINUTES: ${{ env.MAX_CAP_MINUTES }}
+          PORT: ${{ env.PORT }}
+          TUNNEL: ${{ env.TUNNEL }}
+        with:
+          script: |
+            const mark = process.env.STATUS_MARK;
+            const mins = process.env.RUNTIME_MINS || process.env.KEEP_MINUTES || 'unknown';
+            const os   = process.env.RUNNER_OS;
+            const tun  = process.env.TUNNEL;
+            const port = process.env.PORT;
+            const cap  = process.env.MAX_CAP_MINUTES;
+
+            // Don’t overwrite a frozen status (e.g., ngrok missing token gate)
+            if (process.env.STATUS_FREEZE === 'true') {
+              core.info('STATUS_FREEZE=true — skipping ended update.');
+              return;
+            }
+
+            const body = [
+              mark,
+              "### Tunnel Sandbox · Status",
+              "",
+              `**OS:** \`${os}\`  |  **Tunnel:** \`${tun}\`  |  **App Port:** \`${port}\``,
+              "",
+              "✅ **Session ended** — the previous link/command is no longer active.",
+              "",
+              `_Ran for about ${mins} minute(s). Max runtime is capped at ${cap} minutes._`,
+              "_Edit this issue to start a fresh session (changes cancel the previous run)._",
+              ""
+            ].join("\n");
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100
+            });
+            const prev = comments.find(c => c.body && c.body.includes(mark));
+            if (prev) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: prev.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+            }
 
       # ------------------ Failure Handling ------------------
       - name: Collect logs (on failure)
