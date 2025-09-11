@@ -13,22 +13,25 @@ Start a Hello World server and expose it via various tunnels.
 
 ### 1. Runner OS (select one OS)
 
-- [x] Ubuntu (ubuntu-latest)
+- [ ] Ubuntu (ubuntu-latest)
 - [ ] macOS (macos-14)
-- [ ] Windows (windows-latest)
+- [x] Windows (windows-latest)
 
 ### 2. Tunnel (select one tunnel)
 
-- [x] Cloudflare Tunnel
+- [ ] Cloudflare Tunnel
 - [ ] localhost.run
 - [ ] ngrok               <sup>\*</sup>
 - [ ] Tailscale           <sup>†</sup>
-- [ ] Tor                 <sup>‡</sup>
+- [x] Tor                 <sup>‡</sup>
 - [ ] Tunnelmole
 
 ### 3. Power (power up your runner)
 
-- [ ] ON (check this box to start the sandbox)
+- [x] ON (check this box to start the sandbox)
+
+> [!TIP]
+> *Change the power or options anytime to create a fresh server. You never need to open another issue.*
 
 ### 4. Optional Config
 
@@ -51,5 +54,5 @@ minutes: 40
 > Toggle the **Control Panel** checkboxes any time to reconfigure. You can also edit the issue. The previous run cancels, a fresh one starts, and the status comment updates.
 
 > [!NOTE]
-> Want tunnel comparisons? See the **full table in the README](../blob/main/README.md#tunnels-supported)** →  
+> Want tunnel comparisons? See the **full table in the README](../blob/main/README.md#tunnels-supported)** →
 
