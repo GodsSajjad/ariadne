@@ -10,17 +10,6 @@ assignees: ''
 
 *Spin up a short-lived server on a GitHub Actions runner and expose it with your tunnel of choice. Each time you change the Control Panel below and save, the workflow re-runs with the new options. You can also edit this comment directly.*
 
-> [!WARNING]
-> **Public URL = public.** Don’t serve secrets. Sessions are ephemeral and auto-stop.
-
-> [!TIP]
-> Toggle the **Control Panel** checkboxes any time to reconfigure. You can also edit the issue. The previous run cancels, a fresh one starts, and the status comment updates.
-
-> [!NOTE]
-> Want tunnel comparisons? See the **full table in the README](../blob/main/README.md#tunnels-supported)** →  
-
----
-
 ## 🔧 Control Panel
 
 Select a runner OS and tunnel, then check **ON** to start.
@@ -56,3 +45,16 @@ port: 8080
 # Minutes to keep the runner alive (workflow hard-cap is 80)
 minutes: 40
 ````
+
+#### Common Sense
+
+> [!WARNING]
+> **Public URL = public.** Don’t serve secrets. Sessions are ephemeral and auto-stop.
+
+> [!TIP]
+> Toggle the **Control Panel** checkboxes any time to reconfigure. You can also edit the issue. The previous run cancels, a fresh one starts, and the status comment updates.
+
+> [!NOTE]
+> Want tunnel comparisons? See the **full table in the README](../blob/main/README.md#tunnels-supported)** →  
+
+
