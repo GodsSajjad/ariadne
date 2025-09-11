@@ -79,7 +79,7 @@ Everything else (Cloudflare, localhost.run, **Tunnelmole**, Tor) auto‑installs
 
 Notes:
 
-* * **ngrok** requires a repo secret `NGROK_AUTHTOKEN`. Without it, the ngrok path is blocked and the bot comment tells you how to fix it.
+* \* **ngrok** requires a repo secret `NGROK_AUTHTOKEN`. Without it, the ngrok path is blocked and the bot comment tells you how to fix it.
 * † **Tailscale SSH on Windows** is not yet supported by Tailscale; we show an informational message (runner still joins the tailnet).
 * ‡ **Tor** links require the Tor Browser at the access point.
 
