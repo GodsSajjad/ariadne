@@ -1,77 +1,176 @@
-# Ariadne Tunneling Sandbox for GitHub Actions
+# Ariadne: turn **2000 free Actions minutes** into live demos
 
-**Spin up ephemeral test environments on demand, directly from a GitHub issue.**
+Spin up an ephemeral server on a GitHub Actions runner and get a **shareable URL**—from a single GitHub issue. Pick the OS, pick a tunnel, check **ON**. A bot replies with the link or SSH command.
 
-Ariadne is a powerful, issue-driven automation that allows developers to instantly create temporary servers on GitHub Actions runners. These environments are exposed to the world via a selection of secure tunnels, providing a flexible and secure way to test, debug, and share work in progress.
+## TL;DR — Try it in \~60 seconds
 
-The entire system is controlled by a "Control Panel" within a GitHub issue template. Simply check the boxes for your desired OS and tunnel, submit the issue, and a bot will comment back with the access details.
+1. **Fork this repo** → [Fork »](../../fork)
+2. **Enable Actions** → [Settings » Actions »](../../settings/actions) choose *Allow all actions and reusable workflows*
+3. **Create the sandbox issue** → [New Issue with template »](../../issues/new?template=tunnel-sandbox.md&title=Tunnel%20Sandbox)
 
-![Ariadne Demo](https://user-images.githubusercontent.com/12345/your-demo-image.gif)  
-*(Suggestion: You should create a short screen recording of the process and replace this link!)*
+   * Pick **OS** (Ubuntu / macOS / Windows)
+   * Pick a **tunnel** (Cloudflare, localhost.run, ngrok, Tailscale, Tor, Tunnelmole)
+   * Check **ON** 
 
-## Features
+4. Watch the bot’s comment for your access link/command. To create a different host you don't have to open a new issue, just toggle the checkboxes to restart or re-run with different options.
 
-*   **Issue-Driven:** No command line or special tools needed. If you can edit a GitHub issue, you can launch a server.
-*   **Multi-Platform:** Supports `Ubuntu`, `macOS`, and `Windows` runners.
-*   **Multi-Tunnel:** Choose the best way to expose your server:
-    *   **Cloudflare Tunnel:** Quick, public, and reliable HTTPS URLs.
-    *   **localhost.run:** Zero-config, free SSH reverse tunnel for instant public access.
-    *   **Tailscale:** Securely join the runner to your private tailnet for SSH access.
-    *   **Tor:** Expose the server as an anonymous Onion Service.
-*   **Automated Status Updates:** A bot keeps the issue updated with the latest status, from parsing selections to providing the final access URL or command.
-*   **Debug-Ready:** Failed runs automatically open a secure, private `tmate` SSH session for live debugging directly on the runner.
+## Common Sense
 
-## How It Works
+> [!TIP]
+> **Start here:** **[Fork »](../../fork)** • **[Enable Actions »](../../settings/actions)** • **[Get Started »](../../issues/new?template=tunnel-sandbox.md)**
+>
+> If your chosen tunnel needs a token, add it under **Actions secrets**: **[Open Secrets »](../../settings/secrets/actions)**
+> – ngrok → `NGROK_AUTHTOKEN`  •  Tailscale → `TAILSCALE_AUTHKEY` (ephemeral)
 
-The process is simple and powerful, orchestrating several key components:
+> [!WARNING]
+> **Public URL = public.** Don’t serve secrets. Sessions are ephemeral and auto‑stop.
 
-1.  **GitHub Issue Trigger:** A user opens or edits an issue using the `Tunnel Sandbox` template.
-2.  **`parse` Job:** A GitHub Action workflow triggers. The first job uses a robust Bash script (`./.github/scripts/parse_issue_body.sh`) to parse the checkboxes and YAML configuration from the issue body.
-3.  **`run` Job:** The main job launches on the user-selected OS. It starts a simple "Hello World" Node.js server.
-4.  **Tunnel Activation:** Based on the user's choice, the workflow installs the necessary tools and starts the selected tunnel, pointing it at the running web server.
-5.  **Status Comment:** The workflow uses a `github-script` step to post and update a comment on the original issue, providing the public URL or the `ssh` command needed to access the sandbox.
+> [!NOTE]
+> Works on **Ubuntu, macOS, Windows** with tunnels: **Cloudflare**, **localhost.run**, **ngrok**, **Tailscale**, **Tor**, and **Tunnelmole**
 
-## Quick Start (For Users)
+---
+## What you get
 
-1.  Navigate to the "Issues" tab of this repository.
-2.  Click "New Issue" and choose the **"Tunnel Sandbox"** template.
-3.  Fill out the **🔧 Control Panel** by checking the boxes for your desired OS and tunnel.
-4.  (Optional) Edit the YAML block to change the default port or runtime.
-5.  Check the **"ON"** box to power on the sandbox.
-6.  Click "Submit new issue".
-7.  Within a minute, a bot will post a status comment. This comment will automatically update with the access URL or command once the runner is ready.
+* **Issue‑driven UX** — anyone can spin a demo by ticking checkboxes.
+* **Multi‑OS** — Ubuntu, macOS, Windows runners.
+* **Multi‑Tunnel** — pick the edge you want (public URL vs private tailnet vs Tor).
+* **Auto status** — bot comment shows the link/command and required next steps.
+* **Debug on failure** — short‑lived `tmate` rescue shell for triage.
+* **Hard cap** — sessions stop at **80 minutes** max (configurable lower).
 
-To change settings, simply edit the issue body. The workflow will cancel the previous run and start a new one with the updated configuration.
+## Bring your own app (BYO)
 
-## Setup (For Repository Admins)
+We ship a tiny Node “Hello World” for the demo. To expose **your** service instead:
 
-To get Ariadne working in your own repository, you need to add four components:
+* Edit the [workflow file](../../edit/main/.github/workflows/tunnel-sandbox.yml)
+* Start your app before the tunnel step (Docker/Python/Go/etc.).
+* Make sure it listens on the configured port (default **8080**), or change the config.
+* The tunnel simply forwards that port to a public URL (or tailnet for Tailscale, or `.onion` for Tor).
 
-1.  **Secrets:**
-    *   `TAILSCALE_AUTHKEY`: An ephemeral, reusable auth key from your Tailscale Admin Console. It's recommended to associate this key with a specific tag (e.g., `tag:ci-runner`).
+> [!NOTE]
+> The **Control Panel** stays the same—only your app steps change.
 
-2.  **Workflow File:**
-    *   Copy the main workflow file to `.github/workflows/tunnel-sandbox.yml`.
+---
 
-3.  **Parsing Script:**
-    *   Create the helper script at `.github/scripts/parse_issue_body.sh`.
+## Minimal setup
 
-4.  **Issue Template:**
-    *   Create the issue template at `.github/ISSUE_TEMPLATES/tunnel-sandbox.md`.
+Most tunnels are zero‑config. Only two need secrets:
 
-5.  **Tailscale ACLs (Required for Tailscale SSH):**
-    *   You must update your tailnet's Access Controls to allow SSH connections to the tag you are using. For example, add a rule to allow your `group:devops` to connect to your `tag:ci-runner` on port 22.
+* **ngrok** → add `NGROK_AUTHTOKEN` (repo: [Actions secrets »](../../settings/secrets/actions)).
+* **Tailscale** → add ephemeral `TAILSCALE_AUTHKEY` (repo: [Actions secrets »](../../settings/secrets/actions)). Ensure your ACLs permit SSH to the runner’s tag.
 
-## Supported Platforms & Tunnels
+Everything else (Cloudflare, localhost.run, **Tunnelmole**, Tor) auto‑installs as needed.
 
-This matrix shows the current working status of each tunnel across the supported operating systems.
+> [!IMPORTANT]
+> **ngrok requires a token.** If `NGROK_AUTHTOKEN` is missing, the run fails early and the bot comment explains how to add it.
 
-| Tunnel | Ubuntu | macOS | Windows |
-| :--- | :---: | :---: | :---: |
-| **Cloudflare Tunnel** | ✅ | ✅ | ✅ |
-| **localhost.run** | ✅ | ✅ | ✅ |
-| **Tor Onion Service** | ✅ | ✅ | ✅ |
-| **Tailscale** | ✅ | ✅ | ℹ️ |
+---
 
-**Note on Tailscale for Windows:** While the runner will successfully join your tailnet, the `tailscale ssh` feature is **not yet supported by Tailscale on the Windows platform.** The workflow will provide an informational message. You can track the progress in [tailscale/tailscale#4697](https://github.com/tailscale/tailscale/issues/4697).
+## Tunnels supported
+
+| Tunnel                                                                                                         | Public link?                         | Setup (Runner → User)                        | Typical perf              | Reliability/NAT | Privacy / Exposure                | Best for                         |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------ | -------------------------------------------- | ------------------------- | --------------- | --------------------------------- | -------------------------------- |
+| **Cloudflare Tunnel** ([docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)) | Yes (`*.trycloudflare.com`)          | Auto‑install client → click URL              | Good–Very good            | High            | Public at edge; origin private    | Quick public demos               |
+| **localhost.run** ([site](https://localhost.run))                                                              | Yes (`http(s)://…lhr.life`)          | SSH reverse tunnel → URL appears             | OK–Good                   | Medium          | Public at edge                    | Free, zero‑config link           |
+| **Tunnelmole** ([site](https://tunnelmole.com))                                                                | Yes (`https://…tunnelmole.net/.com`) | Auto‑install client → click URL              | Good                      | High            | Public at edge; origin private    | OSS ngrok‑style demos; easy URLs |
+| **ngrok** \* ([site](https://ngrok.com))                                                                       | Yes (`*.ngrok‑free.app`)             | Client + **auth token required** → click URL | Good–Very good            | High            | Public at edge; interstitial page | Webhooks & shareable demos       |
+| **Tailscale** † ([site](https://tailscale.com))                                                                | No public URL                        | Runner joins tailnet → SSH port‑forward      | LAN‑like, low latency     | Very high       | Private to your tailnet           | Private team access/debug        |
+| **Tor** ‡ ([site](https://www.torproject.org))                                                                 | Yes (`.onion`)                       | Hidden service → onion URL                   | Variable (higher latency) | High            | Pseudonymous; Tor‑only            | Privacy‑focused access           |
+
+Notes:
+
+* * **ngrok** requires a repo secret `NGROK_AUTHTOKEN`. Without it, the ngrok path is blocked and the bot comment tells you how to fix it.
+* † **Tailscale SSH on Windows** is not yet supported by Tailscale; we show an informational message (runner still joins the tailnet).
+* ‡ **Tor** links require the Tor Browser at the access point.
+
+---
+
+## Platforms matrix (tunnel × OS)
+
+| Tunnel                | Ubuntu | macOS | Windows |
+| :-------------------- | :----: | :---: | :-----: |
+| **Cloudflare Tunnel** |    ✅   |   ✅   |    ✅    |
+| **localhost.run**     |    ✅   |   ✅   |    ✅    |
+| **Tunnelmole**        |    ✅   |   ✅   |    ✅    |
+| **ngrok** \*          |    ✅   |   ✅   |    ✅    |
+| **Tailscale** †       |    ✅   |   ✅   |    ℹ️   |
+| **Tor**               |    ✅   |   ✅   |    ✅    |
+
+ℹ️ **Tailscale on Windows:** the runner joins the tailnet, but **Tailscale SSH** has upstream limitations; the workflow posts guidance in the status comment.
+
+---
+
+## How it works
+
+1. **Parse** — a script reads the issue’s checkboxes + optional YAML (`port`, `minutes`).
+2. **Run** — selected OS runner boots; your app (or demo server) starts; chosen tunnel activates.
+3. **Comment** — we upsert a status comment with the access method and any required instructions.
+4. **Keep‑alive** — holds up to your requested time (max **80 min**), then exits.
+
+On errors, we dump concise logs and open a time‑boxed `tmate` shell.
+
+---
+
+## Troubleshooting
+
+> [!IMPORTANT]
+> **ngrok** (*token required*)
+1. Add a repository secret named **`NGROK_AUTHTOKEN`**. If it’s missing, the run fails early and the status comment tells you how to fix it.
+2. Create a free ngrok account → then add `NGROK_AUTHTOKEN` here: [Actions secrets »](../../settings/secrets/actions)
+
+> [!NOTE]
+> **Tailscale** (private, no public URL)
+>
+1. Add an **ephemeral** `TAILSCALE_AUTHKEY` as an Actions repo secret.
+2. Your access device and the runner must be on the **same tailnet**.
+3. Enable **Tailscale SSH** and update ACLs to allow “accept” for SSH to the runner’s tag.
+4. **Tip:** Turn off other VPNs (ExpressVPN, NordVPN, etc.) while using Tailscale to avoid dropped tailnet packets.
+
+> [!TIP]
+> **Tor** (requires Tor Browser)
+1. Use the [Tor Browser](https://www.torproject.org/download/) to open the `.onion` URL the bot posts.
+2. The `.onion` site might not be findable right away, sometimes takes a minute to appear.
+
+
+> [!TIP]
+> Want tunnel comparisons (perf, NAT, privacy)? See **[Tunnels supported](#tunnels-supported)** above.
+
+---
+
+## Handy links
+
+* Open the sandbox issue now → **[New Issue with template](../../issues/new?template=tunnel-sandbox.md&title=Tunnel%20Sandbox)**
+* Enable Actions → **[Repo Settings » Actions](../../settings/actions)**
+* Add secrets → **[Repo Settings » Secrets (Actions)](../../settings/secrets/actions)**
+
+---
+
+## Repo anatomy
+
+* Workflow → `.github/workflows/tunnel-sandbox.yml`
+* Parser → `.github/scripts/parse_issue_body.sh`
+* Issue template → `.github/ISSUE_TEMPLATE/tunnel-sandbox.md`
+
+Forked repos can tweak defaults (port, cap), edit the Control Panel copy, or add/remove tunnels without changing the UX.
+
+---
+
+## Security
+
+* Runners are **ephemeral**; files vanish when the job ends.
+* Public tunnels are… public. Don’t expose credentials.
+* Loops are bounded; timeouts prevent hangs; max runtime is capped.
+
+---
+
+## FAQ
+
+**Can I demo my own project?**
+Yes—start your app before the tunnel step and listen on the configured port.
+
+**Stable subdomains?**
+Possible with some tunnels (e.g., ngrok reserved domain, Cloudflare with account, Tunnelmole paid plan). Tor `.onion` lasts for the session.
+
+**Cost?**
+Uses your GitHub Actions minutes (about **2,000 free minutes/month** on personal accounts).
 
