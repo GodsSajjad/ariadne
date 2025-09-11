@@ -9,7 +9,8 @@ Ariadne is how you can explore different tunneling front-ends, plus let people p
 ## TL;DR — Try it in \~60 seconds
 
 1. **Fork this repo** → [Fork »](../../fork)
-2. **Enable Actions** → [Settings » Actions »](../../settings/actions) choose *Allow all actions and reusable workflows*
+2. **Enable Actions** → [Settings » Actions »](../../settings/actions) choose *I understand my workflows*
+3. **Enable Issues**  → [Settings » Features » Issues](../../settings#features) ensure **Issues** is checked.
 3. **From your new repo, create the *Tunnel Sandbox* issue** → [Configure your server  »](../../issues/new?template=tunnel-sandbox.md&title=Tunnel%20Sandbox)
 
    * Pick **OS** (Ubuntu / macOS / Windows)
@@ -21,7 +22,7 @@ Ariadne is how you can explore different tunneling front-ends, plus let people p
 ## Common Sense
 
 > [!TIP]
-> **Start here:** **[Fork »](../../fork)** • **[Enable Actions »](../../settings/actions)** • **[Get Started »](../../issues/new?template=tunnel-sandbox.md)**
+> **Start here:** **[Fork »](../../fork)** • **[Enable Actions »](../../settings/actions)** • **[Enable Issues »](../../settings#features)** • **[Get Started »](../../issues/new?template=tunnel-sandbox.md)**
 >
 > If your chosen tunnel needs a token, add it under **Actions secrets**: **[Open Secrets »](../../settings/secrets/actions)**
 > – ngrok → `NGROK_AUTHTOKEN`  •  Tailscale → `TAILSCALE_AUTHKEY` (ephemeral)
