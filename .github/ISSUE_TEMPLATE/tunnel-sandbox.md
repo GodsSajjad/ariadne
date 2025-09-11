@@ -21,9 +21,9 @@ Start a Hello World server and expose it via various tunnels.
 
 - [ ] Cloudflare Tunnel
 - [ ] localhost.run
-- [ ] ngrok               <sup>\*</sup>
-- [ ] Tailscale           <sup>†</sup>
-- [x] Tor                 <sup>‡</sup>
+- [ ] ngrok               
+- [ ] Tailscale           
+- [x] Tor                 
 - [ ] Tunnelmole
 
 ### 3. Power (power up your runner)
@@ -52,3 +52,5 @@ minutes: 40
 > [!NOTE]
 > Want tunnel comparisons? See the **[full table in the README](../blob/main/README.md#tunnels-supported)** 
 
+> [!INFO]
+> Some tunnels require secrets (like ngrok, or Tailscale) and won't work without them. See the [README](../blob/main/README.md#minimal-setup) for full details.
