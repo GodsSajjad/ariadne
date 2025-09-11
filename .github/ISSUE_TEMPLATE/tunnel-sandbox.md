@@ -6,10 +6,6 @@ labels: tunnel-sandbox
 assignees: ''
 ---
 
-# Ariadne Tunnel Sandbox
-
-*Spin up a short-lived server on a GitHub Actions runner and expose it with your tunnel of choice. Each time you change the Control Panel below and save, the workflow re-runs with the new options. You can also edit this comment directly.*
-
 ## 🔧 Control Panel
 
 Select a runner OS and tunnel, then check **ON** to start.
