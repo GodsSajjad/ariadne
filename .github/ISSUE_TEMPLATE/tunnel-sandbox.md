@@ -43,7 +43,7 @@ port: 8080
 
 # Minutes to keep the runner alive (workflow hard-cap is 80)
 minutes: 40
-````
+```
 
 #### Common Sense
 
@@ -52,5 +52,5 @@ minutes: 40
 > [!NOTE]
 > Want tunnel comparisons? See the **[full table in the README](../blob/main/README.md#tunnels-supported)** 
 
-> [!INFO]
+> [!IMPORTANT]
 > Some tunnels require secrets (like ngrok, or Tailscale) and won't work without them. See the [README](../blob/main/README.md#minimal-setup) for full details.
