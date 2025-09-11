@@ -179,4 +179,4 @@ Possible with some tunnels (e.g., ngrok reserved domain, Cloudflare with account
 Uses your GitHub Actions minutes (about **2,000 free minutes/month** on personal accounts).
 
 **Why?**
-As a way to explore different tunneling front-ends, and to let people play with your app in an easy, zero-config set up on free infrastructure.
+As a way to explore different tunneling front-ends, and to let people play with your app in an easy, zero-config set up on free infrastructure. And also a way to demonstate to people code that they can use to set up these tunnels, across platforms and on infra.
