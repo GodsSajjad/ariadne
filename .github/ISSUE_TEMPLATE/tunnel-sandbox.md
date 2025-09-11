@@ -47,12 +47,8 @@ minutes: 40
 
 #### Common Sense
 
-> [!WARNING]
-> **Public URL = public.** Don’t serve secrets. Sessions are ephemeral and auto-stop.
-
-> [!TIP]
-> Toggle the **Control Panel** checkboxes any time to reconfigure. You can also edit the issue. The previous run cancels, a fresh one starts, and the status comment updates.
+**Public URL = public.** Don’t serve secrets. Sessions are ephemeral and auto-stop.
 
 > [!NOTE]
-> Want tunnel comparisons? See the **full table in the README](../blob/main/README.md#tunnels-supported)** →
+> Want tunnel comparisons? See the **[full table in the README](../blob/main/README.md#tunnels-supported)** 
 
