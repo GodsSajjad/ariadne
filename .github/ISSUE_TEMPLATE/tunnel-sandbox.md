@@ -5,14 +5,11 @@ title: Tunnel Sandbox
 labels: tunnel-sandbox
 assignees: ''
 ---
-
 # Ariadne
 
 Start a Hello World Server and Expose it via Different Tunnels.
 
 ## 🔧 Control Panel
-
-Select a runner OS and tunnel, then check **ON** to start.
 
 ### 1. Runner OS (select one OS)
 
@@ -29,14 +26,13 @@ Select a runner OS and tunnel, then check **ON** to start.
 - [ ] Tor                 <sup>‡</sup>
 - [ ] Tunnelmole
 
-### 3. Power (power on your runner)
+### 3. Power (power up your runner)
 
 - [ ] ON (check this box to start the sandbox)
 
-### 4. Config (Optional)
+### 4. Optional Config
 
-You can override the defaults here. The parser will use these values if the block is present.
-If the block is removed or invalid, defaults apply (Port: 8080, Minutes: 40).
+You can override the defaults here. The parser will use these values if the block is present. If the block is removed or invalid, defaults apply (Port: 8080, Minutes: 40).
 
 ```yaml
 # Port the Hello World server will listen on
@@ -56,6 +52,4 @@ minutes: 40
 
 > [!NOTE]
 > Want tunnel comparisons? See the **full table in the README](../blob/main/README.md#tunnels-supported)** →  
-
-
 
