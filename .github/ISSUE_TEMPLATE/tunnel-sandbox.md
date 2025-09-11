@@ -63,12 +63,13 @@ minutes: 40
 ### Required Secrets (if using these tunnels)
 
 **ngrok***
-- The default, unauthenticated session is temporary (~2 hours) and presents an interstitial warning page.
-- For stable, long-running sessions without the warning page, sign up for a free [ngrok account](https://ngrok.com) and add your `NGROK_AUTHTOKEN` as a repository secret.
+1. Sign up for a free [ngrok account](https://ngrok.com).
+2. Add your `NGROK_AUTHTOKEN` as a repository secret.
 
 **Tailscale†**
-- The repository maintainer must provide an **ephemeral** `TAILSCALE_AUTHKEY` (repo secret).
-- Your access device must be logged into the same Tailscale network (tailnet).
+1. Sign up for a free [Tailscale account](https://tailscale.com).
+2. Add an **ephemeral** `TAILSCALE_AUTHKEY` as a Actions repository secret.
+3. Your access device must be logged into the same tailnet.
 
 ### Tunneling Access Overview
 
