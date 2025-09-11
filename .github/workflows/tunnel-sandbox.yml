@@ -696,6 +696,7 @@ jobs:
             const val  = process.env.ACCESS_VALUE;
             const note = process.env.ACCESS_NOTE;
             const cap  = process.env.MAX_CAP_MINUTES;
+            const user = os == 'Windows' ? 'runneradmin' : 'runner';
             let accessBlock = "Tunnel failed to initialize.";
 
             if (val) {
@@ -708,7 +709,7 @@ jobs:
                 ].join("\n");
               } else if (kind === "ssh" && tsip) {
                 const fwd = 8443;
-                const sshCmd = `ssh -o StrictHostKeyChecking=no -N -L ${fwd}:127.0.0.1:${port} ${tsip}`;
+                const sshCmd = `ssh -o StrictHostKeyChecking=no -N -L ${fwd}:127.0.0.1:${port} ${user}@${tsip}`;
                 accessBlock = [
                   "**Access Method** †", "",
                   "**1. For SSH port-forwarding, paste in your terminal:**",
@@ -716,14 +717,6 @@ jobs:
                   sshCmd,
                   "```",
                   `**2. Then open this URL in your browser:** **http://localhost:${fwd}**`,
-                  "",
-                  "---",
-                  "#### Open a shell to the runner:",
-                  "<table>",
-                  "<tr><th></th><th>Chrome / Firefox</th><th>Safari</th></tr>",
-                  `<tr><td><b>Terminal</b></td><td><a href="ssh:${tsip}">Open</a></td><td><a href="ssh://${tsip}">Open</a></td></tr>`,
-                  `<tr><td><b>iTerm2</b></td><td><a href="iterm2://ssh/${tsip}">Open</a></td><td><a href="iterm2://ssh/${tsip}">Open</a></td></tr>`,
-                  "</table>",
                   "",
                   `† *needs [Tailscale](https://tailscale.com/kb/1347/installation) at your access point*`,
                 ].join("\n");
