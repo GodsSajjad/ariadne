@@ -6,6 +6,8 @@ labels: tunnel-sandbox
 assignees: ''
 ---
 
+# Ariadne
+
 ## 🔧 Control Panel
 
 Select a runner OS and tunnel, then check **ON** to start.
@@ -20,9 +22,9 @@ Select a runner OS and tunnel, then check **ON** to start.
 
 - [x] Cloudflare Tunnel
 - [ ] localhost.run
-- [ ] ngrok<sup>\*</sup>
-- [ ] Tailscale<sup>†</sup>
-- [ ] Tor<sup>‡</sup>
+- [ ] ngrok               <sup>\*</sup>
+- [ ] Tailscale           <sup>†</sup>
+- [ ] Tor                 <sup>‡</sup>
 - [ ] Tunnelmole
 
 ### 3. Power (power on your runner)
@@ -52,5 +54,6 @@ minutes: 40
 
 > [!NOTE]
 > Want tunnel comparisons? See the **full table in the README](../blob/main/README.md#tunnels-supported)** →  
+
 
 

@@ -4,11 +4,13 @@ Start a Hello World server and expose it with different tunnels, all from an iss
 
 You can bring your own server to run an ephemeral server on a GitHub Actions runner and get a **shareable URL**—from a single GitHub issue. Pick the OS, pick a tunnel, check **ON** in the issue - and the server will start. A bot replies with the link or SSH command for Tailscale.
 
+Ariadne is how you can explore different tunneling front-ends, plus let people play with your app in an easy, zero-config set up on free infrastructure.
+
 ## TL;DR — Try it in \~60 seconds
 
 1. **Fork this repo** → [Fork »](../../fork)
 2. **Enable Actions** → [Settings » Actions »](../../settings/actions) choose *Allow all actions and reusable workflows*
-3. **Create the sandbox issue** → [New Issue with template »](../../issues/new?template=tunnel-sandbox.md&title=Tunnel%20Sandbox)
+3. **From your new repo, create the *Tunnel Sandbox* issue** → [Configure your server  »](../../issues/new?template=tunnel-sandbox.md&title=Tunnel%20Sandbox)
 
    * Pick **OS** (Ubuntu / macOS / Windows)
    * Pick a **tunnel** (Cloudflare, localhost.run, ngrok, Tailscale, Tor, Tunnelmole)
@@ -176,3 +178,5 @@ Possible with some tunnels (e.g., ngrok reserved domain, Cloudflare with account
 **Cost?**
 Uses your GitHub Actions minutes (about **2,000 free minutes/month** on personal accounts).
 
+**Why?**
+As a way to explore different tunneling front-ends, and to let people play with your app in an easy, zero-config set up on free infrastructure.
