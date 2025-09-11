@@ -26,6 +26,7 @@ Select a runner, a tunnel, then check "ON" to start!
 
 - [x] Cloudflare Tunnel
 - [ ] localhost.run 
+- [ ] ngrok
 - [ ] Tailscale<sup>†</sup>
 - [ ] Tor<sup>‡</sup>
 

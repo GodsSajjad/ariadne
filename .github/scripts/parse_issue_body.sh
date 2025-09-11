@@ -69,11 +69,11 @@ parse_issue_body() { # stdin markdown → stdout key=value
   checked "$lcfile" "ubuntu"  && OS="ubuntu-latest"
 
   local TUNNEL="cloudflare"
+  checked "$lcfile" "cloudflare"    && TUNNEL="cloudflare"
   checked "$lcfile" "localhost.run" && TUNNEL="localhostrun"
-  checked "$lcfile" "inlets pro"    && TUNNEL="inlets"
+  checked "$lcfile" "ngrok"         && TUNNEL="ngrok"
   checked "$lcfile" "tailscale"     && TUNNEL="tailscale"
   checked "$lcfile" "tor"           && TUNNEL="tor"
-  checked "$lcfile" "cloudflare"    && TUNNEL="cloudflare"
 
   # yaml → everything else
   yaml="$(extract_yaml_block <"$body" || true)"
