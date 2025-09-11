@@ -193,7 +193,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          Start-Process -FilePath "node.exe" -ArgumentList "server.js"
+          Start-Process -FilePath "node222.exe" -ArgumentList "server.js"
           for ($i = 1; $i -le 60; $i++) {
             if (curl.exe localhost:$env:PORT) {
               Write-Output "Port $env:PORT is open."
